@@ -3,7 +3,6 @@ import os
 import argparse
 import yaml
 
-
 logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO")) # log levels, from least severe to most severe, are: DEBUG, INFO, WARNING, ERROR, and CRITICAL.
 log = logging.getLogger(__name__)
 
