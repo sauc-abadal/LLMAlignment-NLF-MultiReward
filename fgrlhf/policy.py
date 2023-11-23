@@ -12,7 +12,7 @@ import torch
 import torch.nn.functional as F
 from transformers import T5ForConditionalGeneration
 from typing import Optional, List, Iterable, Dict, Any, Tuple
-from .utils import logits_to_entropy, mask_pad
+from utils import logits_to_entropy, mask_pad
 
 
 class T5Policy:

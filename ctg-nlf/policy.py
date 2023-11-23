@@ -34,6 +34,9 @@ class T5Policy:
         if self.nlf_cond:
             self.tokenizer.feedback_prefix = "feedback: "
             self.tokenizer.prompt_prefix = "input: "
+        else:
+            self.tokenizer.feedback_prefix = ""
+            self.tokenizer.prompt_prefix = ""
         self.model = self.model.to(self.device)
         self.model.eval()
 
