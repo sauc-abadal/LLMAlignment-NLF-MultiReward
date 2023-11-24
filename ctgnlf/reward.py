@@ -1,21 +1,25 @@
-from my_longformer import LongformerForSequenceClassification, LongformerForTokenClassification
-from reward_utils import split_text_to_subsentences, split_text_to_sentences
+from .my_longformer import LongformerForSequenceClassification, LongformerForTokenClassification
+from .reward_utils import split_text_to_subsentences, split_text_to_sentences
 from typing import Union, List
 import os
 from transformers import AutoTokenizer
 import torch
 import spacy
 from tqdm import tqdm
-from utils import batchify
+from .utils import batchify
 
 class MyFactualityRewardModel:
-    def __init__(self, tokenizer: AutoTokenizer, reward_model_name_or_path: Union[str, os.PathLike], device: torch.device):
+    def __init__(self, policy_tokenizer: AutoTokenizer, 
+                 reward_model_name_or_path: Union[str, os.PathLike], 
+                 device: torch.device,
+                 factuality_positive_reward: float,
+                 factuality_negative_reward: float):
         
 
         self.device = device
 
         # prepare policy tokenizer
-        self.policy_tokenizer = tokenizer
+        self.policy_tokenizer = policy_tokenizer
 
         # prepare reward tokenizer
         self.reward_tokenizer = AutoTokenizer.from_pretrained(reward_model_name_or_path)
@@ -35,8 +39,8 @@ class MyFactualityRewardModel:
         self.sep_id = self.reward_tokenizer.convert_tokens_to_ids(self.sep)
 
         # rewards
-        self.factuality_positive_reward = 0.5
-        self.factuality_negative_reward = -0.5
+        self.factuality_positive_reward = factuality_positive_reward
+        self.factuality_negative_reward = factuality_negative_reward
 
     def find_sep_position(self, input_ids):
         return torch.nonzero(input_ids == self.sep_id, as_tuple=False).squeeze().tolist()

@@ -12,7 +12,7 @@ import torch
 import torch.nn.functional as F
 from transformers import T5ForConditionalGeneration, AutoTokenizer
 from typing import Optional, List, Iterable, Dict, Any, Tuple
-from utils import logits_to_entropy, mask_pad, find_last_non_masked_ids, NEGATIVE_INF
+from .utils import logits_to_entropy, mask_pad, NEGATIVE_INF
 
 
 class T5Policy:
@@ -20,23 +20,15 @@ class T5Policy:
     def __init__(self,
                  model_ckpt: str,
                  device,
+                 tokenizer: AutoTokenizer,
                  temperature: float = 1.0,
-                 nlf_cond: bool = False,
                 ):
         
         self.model = T5ForConditionalGeneration.from_pretrained(model_ckpt)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_ckpt, model_max_length=1024)
-        self.tokenizer.max_input_len = 1024
-        self.tokenizer.max_generated_len = 200
+        self.tokenizer = tokenizer
         self.device = device
         self.temperature = temperature
-        self.nlf_cond = nlf_cond
-        if self.nlf_cond:
-            self.tokenizer.feedback_prefix = "feedback: "
-            self.tokenizer.prompt_prefix = "input: "
-        else:
-            self.tokenizer.feedback_prefix = ""
-            self.tokenizer.prompt_prefix = ""
+
         self.model = self.model.to(self.device)
         self.model.eval()
 

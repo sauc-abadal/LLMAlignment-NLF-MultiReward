@@ -3,7 +3,7 @@ import json
 import os
 from typing import List, Dict, Union, Tuple
 from torch.utils.data import Dataset
-from data_pool import DataPool
+from .data_pool import DataPool
 from transformers import AutoTokenizer
 
 class PromptDataset(Dataset):

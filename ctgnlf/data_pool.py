@@ -19,14 +19,14 @@ class DataPool:
                 num_quantiles = 5
                 num_attributes = 1
                 feedback_types = [
-                    [_TREE_TOKEN_00000, _TREE_TOKEN_00001, _TREE_TOKEN_00002, _TREE_TOKEN_00003, _TREE_TOKEN_00004],
+                    [_TREE_TOKEN_0_0, _TREE_TOKEN_0_1, _TREE_TOKEN_0_2, _TREE_TOKEN_0_3, _TREE_TOKEN_0_4],
                 ]
             
             NLF (Factuality):
                 num_quantiles = 5
                 num_attributes = 1
                 feedback_types = [
-                    [Very factual, Majorly factual, Moderately factual, Slightly factual, Completely factual],
+                    [Very factual, Majorly factual, Moderately factual, Slightly non factual, Completely non factual],
                 ]
         """
         self.feedback_types = feedback_types
