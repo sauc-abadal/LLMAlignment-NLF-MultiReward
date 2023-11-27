@@ -1,12 +1,14 @@
 from .my_longformer import LongformerForSequenceClassification, LongformerForTokenClassification
 from .reward_utils import split_text_to_subsentences, split_text_to_sentences
+from .evaluators import get_rouge_scores
+from .utils import batchify
+
 from typing import Union, List
 import os
 from transformers import AutoTokenizer
 import torch
 import spacy
 from tqdm import tqdm
-from .utils import batchify
 
 class MyFactualityRewardModel:
     def __init__(self, policy_tokenizer: AutoTokenizer, 
@@ -171,3 +173,38 @@ class MyFactualityRewardModel:
             rewards.extend(self.get_reward(prompt_texts_batch, generated_texts_batch)["rewards"])
             pbar.update(len(prompt_texts_batch))
         return rewards
+    
+    def get_full_reward_batch(self,
+                              prompt_texts: List[str],
+                              generated_texts: List[str],
+                              batch_size: int,
+                              references: List[str]):
+        
+        pbar = tqdm(total=len(prompt_texts), dynamic_ncols=True)
+        pbar.set_description("Computing full Factuality rewards in batches...")
+        n_sentences, n_corrects, pooled_rewards = [], [], []
+        for batch in zip(batchify(prompt_texts, batch_size=batch_size), batchify(generated_texts, batch_size=batch_size)):
+            prompt_texts_batch, generated_texts_batch = batch
+
+            full_reward_batch = self.get_full_reward(prompt_texts_batch, generated_texts_batch)
+            n_sentences_batch = full_reward_batch ['n_sentences']
+            n_corrects_batch = full_reward_batch['n_corrects']
+            pooled_rewards_batch = [sum(x) for x in full_reward_batch['factuality_rewards']]
+
+            n_sentences.extend(n_sentences_batch)
+            n_corrects.extend(n_corrects_batch)
+            pooled_rewards.extend(pooled_rewards_batch)
+
+            pbar.update(len(prompt_texts_batch))
+        
+        generations_lens = [len(self.policy_tokenizer.encode(text)) for text in generated_texts]
+        rouge_scores = get_rouge_scores(generated_texts, references)
+
+        output = {
+            "n_sentences": n_sentences,
+            "n_corrects": n_corrects,
+            "pooled_rewards": pooled_rewards,
+            "generations_lens": generations_lens,
+            "rouge_scores": rouge_scores
+        }
+        return output

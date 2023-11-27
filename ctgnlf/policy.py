@@ -30,6 +30,7 @@ class T5Policy:
         self.temperature = temperature
 
         self.model = self.model.to(self.device)
+        self.model.parallelize()
         self.model.eval()
 
 

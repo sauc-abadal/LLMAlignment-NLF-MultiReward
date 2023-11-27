@@ -140,15 +140,16 @@ class ConditionOnFeedbackTrainer:
         return (query, response)
     
     def sample(self, step_num):
-        if step_num % self.params['reward']['sample_interval'] != 0:
+        if step_num % self.params['reward']['factuality_model']['sample_interval'] != 0:
             return
         
         log.info(f"[step {step_num}] Sampling ...")
 
         prompts, responses = [], []
         for i, batch in enumerate(tqdm(self.train_dataloader, total=len(self.train_dataloader), desc='Sampling from current policy')):
-
-            input_ids, attention_mask = batch
+            if i == 20:
+                break
+            input_ids, attention_mask = batch["inputs"]
 
             # in the first sampling phase we sample from the reference policy without conditioning on any feedback / quantile reward tokens
             if step_num == 0:
@@ -158,7 +159,7 @@ class ConditionOnFeedbackTrainer:
                                                   top_k=self.params['model']['policy_model']['train_generation_kwargs']['top_k'],
                                                   top_p=self.params['model']['policy_model']['train_generation_kwargs']['top_p'],
                                                   temperature=self.params['model']['policy_model']['train_generation_kwargs']['temperature'])
-                prompt, response = rollouts["promts_text"], rollouts["generated_text"]
+                prompt, response = rollouts["prompts_text"], rollouts["generated_text"]
             
             # otherwise, sample from the current policy conditioning on the best feedback / quantile reward tokens
             else:
@@ -181,14 +182,14 @@ class ConditionOnFeedbackTrainer:
             prompts.extend(prompt)
             responses.extend(response)
 
-        scores = self.score_model.get_reward_batch(prompt_texts=prompts, generated_texts=responses, batch_size=self.params['reward']['batch_size'])
+        scores = self.score_model.get_reward_batch(prompt_texts=prompts, generated_texts=responses, batch_size=self.params['reward']['factuality_model']['batch_size'])
         scores = [scores] # collect each List of scores for each attribute into a list, now single attribute (factuality)
         self.data_pool.add(prompts=prompts, responses=responses, scores=scores)
 
         # save tuples of (promp, response, score) in reward_file
-        reward_file = Path(args.reward_dir) / f"factuality_{step_num}.json"
+        reward_file = Path(self.params['reward_dir']) / f"factuality_{step_num}.json"
         with reward_file.open('a') as f:
-            for idx, prompt_data, response_data, score_data in enumerate(zip(prompts, responses)):
+            for idx, (prompt_data, response_data) in enumerate(zip(prompts, responses)):
                 response_dict = {
                     'prompt': prompt_data,
                     'response': response_data,
@@ -209,8 +210,10 @@ class ConditionOnFeedbackTrainer:
 
     def step(self, step_num):
         step_started_at = time.time()
-        self.sample(step=step_num)
-
+        self.policy.model.eval()
+        self.sample(step_num)
+        self.policy.model.train()
+ 
         try:
             batch = next(self.sampler)
             assert len(batch[0]) == self.params['train']['training_batch_size_per_card'], 'insufficent batch'
@@ -221,6 +224,7 @@ class ConditionOnFeedbackTrainer:
 
         self.optimizer.zero_grad()
         loss, stats = self.loss(step_num, *batch)
+        loss.backward()
 
         if self.params['train']['clip_grad']:
             torch.nn.utils.clip_grad_norm_(self.policy.model.parameters(), self.params['train']['max_grad_norm'])
@@ -241,8 +245,9 @@ class ConditionOnFeedbackTrainer:
         step_time = time.time() - step_started_at
         eps_per_second = float(self.params['train']['training_batch_size_per_card']) / step_time
         log.info(f"[step {step_num}] step_time={step_time:.2f}s, eps/s={eps_per_second:.2f}")     
-        self.save(step=step_num)
-        self.eval(step=step_num)
+        self.save(step_num)
+        self.policy.model.eval()
+        self.eval(step_num)
     
     def loss(self, step_num, query_input_ids, query_mask, response_input_ids, response_mask):
         outputs = self.policy.forward_pass(query_input_ids, query_mask, response_input_ids, response_mask)
@@ -269,9 +274,9 @@ class ConditionOnFeedbackTrainer:
                 'entropy': reduce_mean(entropy, masks), 'total_loss': loss}
         stats = self.record_step_stats(data)
 
-        queries, responses = self.decode(query_input_ids, response_input_ids)
+        queries, responses = self.decode(self.policy.tokenizer, query_input_ids, response_input_ids)
         self.print_samples(queries=queries, responses=responses, lm_loss=reduce_mean(lm_loss, masks, axis=1),
-                           logprobs=logprobs, ref_logprobs=ref_logprobs, masks=masks, step=step_num)
+                           logprobs=logprobs, ref_logprobs=ref_logprobs, masks=masks, step_num=step_num)
 
         return loss, stats
 
@@ -294,7 +299,7 @@ class ConditionOnFeedbackTrainer:
         return stats
 
     def print_samples(self, queries, responses, lm_loss, logprobs, ref_logprobs, masks, step_num):
-        if step_num % self.params.log_interval != 0:
+        if step_num % self.params['logging']['log_interval'] != 0:
             return
 
         log.info(f"[step {step_num}] Printing samples examples ...")
@@ -314,7 +319,7 @@ class ConditionOnFeedbackTrainer:
             'policy_model': self.policy.model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
             'scheduler': self.scheduler.state_dict()
-        }, f'{self.params.model_dir}/ckp_{step_num}.pth')
+        }, f'{self.params["model_dir"]}/ckp_{step_num}.pth')
         log.info(f"[step {step_num}] Model checkpoint saved")
 
     def eval(self, step_num):
@@ -322,10 +327,62 @@ class ConditionOnFeedbackTrainer:
             return
         log.info(f"[step {step_num}] Evaluating ...")
 
-        pass # to be implemented
+        prompts, responses = [], []
+        references = []
+        for i, batch in enumerate(tqdm(self.dev_dataloader, desc='Sampling from current policy')):
+            with torch.no_grad():
+                input_ids, attention_mask = batch["inputs"]
+                references.extend(batch["references"])
+
+                input_ids_feedback, attention_mask = self.add_feedback_to_prompt_input_ids(
+                    input_ids=input_ids, attention_mask=attention_mask,
+                    tokenizer=self.policy.tokenizer,
+                    best_feedback=True,
+                    nlf_cond=self.nlf_cond
+                )
+                rollouts = self.policy.sample(prompts_input_ids=input_ids_feedback,
+                                              prompts_attention_mask=attention_mask,
+                                              do_sample=self.params['model']['policy_model']['eval_generation_kwargs']['do_sample'],
+                )
+                response = rollouts["generated_text"]
+                prompt = self.decode(tokenizer=self.policy.tokenizer, query_input_ids=input_ids)
+
+                prompts.extend(prompt)
+                responses.extend(response)
+
+        eval_output = self.score_model.get_full_reward_batch(
+            prompt_texts=prompts, 
+            generated_texts=responses, 
+            batch_size=self.params['reward']['factuality_model']['batch_size'],
+            references=references
+        )
+
+        n_sentences = eval_output["n_sentences"]
+        n_corrects = eval_output["n_corrects"]
+        pooled_rewards = eval_output["pooled_rewards"]
+        generations_lens = eval_output["generations_lens"]
+        rouge_scores = eval_output["rouge_scores"]
+
+        fact_scores_mean_over_num_samples = np.mean(pooled_rewards) # averaged output score for all dev_set samples 
+        fact_scores_mean_over_num_sentences = np.sum(pooled_rewards) / np.sum(n_sentences) # averaged output score for all dev_set senteces
+        fact_correct_ratio = np.sum(n_corrects) / np.sum(n_sentences) # percentage of al sentences in the dev_set predicted as "no error"
+        avg_generations_lens = np.mean(generations_lens)
+        avg_rouge_scores = np.mean(rouge_scores)
+
+        log.info(f"Averaged Factuality score for all dev_set samples = {fact_scores_mean_over_num_samples:+.2f}")
+        log.info(f"Averaged Factuality score for all dev_set sentences = {fact_scores_mean_over_num_sentences:+.2f}")
+        log.info(f"Percentage of all sentences in the dev_set predicted as 'no error' = {fact_correct_ratio:+.2f}")
+        log.info(f"Average generations lenght = {avg_generations_lens:+.2f}")
+        log.info(f"Average RougeLSum = {avg_rouge_scores:+.2f}")
+        if self.params['logging']['wandb_log']:
+            wandb.log({f'Evaluation/fact_scores_mean_over_num_samples': fact_scores_mean_over_num_samples}, step=step_num)
+            wandb.log({f'Evaluation/fact_scores_mean_over_num_sentences': fact_scores_mean_over_num_sentences}, step=step_num)
+            wandb.log({f'Evaluation/fact_correct_ratio': fact_correct_ratio}, step=step_num)
+            wandb.log({f'Evaluation/avg_len': avg_generations_lens}, step=step_num)
+            wandb.log({f'Evaluation/avg_RougeLSum': avg_rouge_scores}, step=step_num)
+
 
 def main():
-
     # set seed
     set_seed(
         seed=args['train']['seed'], 
@@ -398,7 +455,7 @@ def main():
         tokenizer.add_tokens(flattened_feedback_types, special_tokens=True)
 
     ref_policy = T5Policy(
-        model_ckpt=args['model']['ref_policy'],
+        model_ckpt=args['model']['ref_policy']['ckpt'],
         device=device,
         tokenizer=tokenizer
     )
@@ -436,7 +493,6 @@ def main():
     # load datasets and dataloaders
     log.info(f'Loading data ...')
     prompt_collator = PromptCollator(tokenizer=tokenizer)
-    seq_collator = SequenceWithFeedbackCollator(tokenizer=tokenizer)
 
     train_dataset = PromptDataset(path=args['data']['train_data_path'])
     train_dataloader = DataLoader(
@@ -446,8 +502,7 @@ def main():
         drop_last=True,
         collate_fn=prompt_collator
     )
-    log.info(f"Train dataset loaded with {len(train_dataset)} samples. \
-             | Train dataloader with {len(train_dataloader)} batches")
+    log.info(f"Train dataset loaded with {len(train_dataset)} samples | Train dataloader with {len(train_dataloader)} batches")
 
     dev_dataset = PromptDataset(path=args['data']['dev_data_path'])
     dev_dataloader = DataLoader(
@@ -457,8 +512,7 @@ def main():
         drop_last=False,
         collate_fn=prompt_collator
     )
-    log.info(f"Dev dataset loaded with {len(dev_dataset)} samples. \
-             | Dev dataloader with {len(dev_dataloader)} batches")
+    log.info(f"Dev dataset loaded with {len(dev_dataset)} samples | Dev dataloader with {len(dev_dataloader)} batches")
     
     # prepare optimizer and schedulers
     optimizer = torch.optim.Adam(policy.model.parameters(), 
@@ -491,7 +545,9 @@ def main():
     for step_num in steps:
         try:
             trainer.step(step_num)
-        except RuntimeError:
+        except Exception as e:
+            log.info("There was an Exception while trying to perform trainer.step()!")
+            log.info(e)
             torch.cuda.empty_cache()
             continue
 

@@ -20,6 +20,7 @@ class PromptDataset(Dataset):
             data = json.load(file)
 
         self.prompts = [item["text"].strip() for item in data]
+        self.references = [item["answer"] for item in data]
 
     def __len__(self) -> int:
         """
@@ -40,7 +41,8 @@ class PromptDataset(Dataset):
         Returns:
             dict: A dictionary containing the prompt text.
         """
-        return {'prompt': self.prompts[idx]}
+        return {'prompt': self.prompts[idx],
+                'reference': self.references[idx]}
 
 
 class PromptCollator(object):
@@ -53,7 +55,7 @@ class PromptCollator(object):
         """
         self.tokenizer = tokenizer
 
-    def __call__(self, sequences: List[Dict[str, str]]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, sequences: List[Dict[str, str]]) -> Dict[str, Union[Tuple[torch.Tensor, torch.Tensor], List[str]]]:
         """
         Collate prompts for language model input, including tokenization and padding.
 
@@ -74,7 +76,10 @@ class PromptCollator(object):
         input_ids = encodings_dict['input_ids']
         attention_mask = encodings_dict['attention_mask']
 
-        return input_ids, attention_mask
+        references = [sequence['reference'] for sequence in sequences]
+
+        return_dict = {"inputs": (input_ids, attention_mask), "references": references}
+        return return_dict
 
 
 class SequenceWithFeedbackDataset(Dataset):
