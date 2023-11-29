@@ -4,12 +4,12 @@ with open("requirements.txt") as fp:
     requirements = fp.read().splitlines()
 
 setup(
-    name="fgrlhf",
-    version="0.1.0",
-    description="A library for fine-grained rlhf",
-    author="Zeqiu Wu*, Yushi Hu*",
+    name="ctgnlf",
+    version="0.0.0",
+    description="A library for controlled text generation using NL feedback",
+    author="Saüc Abadal*",
     packages=find_packages(),
     python_requires=">=3.9",
     install_requires=requirements,
-    url="https://github.com/allenai/FineGrainedRLHF",
+    url="https://github.com/sauc-abadal/MultiTask-CTG-NLF",
 )

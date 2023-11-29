@@ -9,7 +9,9 @@ import torch
 from tqdm.auto import tqdm
 import os
 import collections
-import re
+
+WANDB_API_KEY = os.environ.get("WANDB_API_KEY", None)
+WANDB_API_KEY = str(WANDB_API_KEY)
 
 NEGATIVE_INF = -100000.0
 
@@ -159,15 +161,3 @@ def get_tensorboard_logname(comment=""):
     log_dir = os.path.join(
         'runs', current_time + '_' + socket.gethostname() + comment)
     return log_dir
-
-def find_last_non_masked_ids(attention_mask):
-  """
-  Finds the index position of the last non masked value by flipping the attention mask tensor
-  and leveraging that torch.argmax() returns the first maximal values.
-  """
-  sequence_length = attention_mask.shape[1]
-  flipped_mask = torch.flip(attention_mask, dims=[1])
-  first_max_indices = torch.argmax(flipped_mask, dim=1)
-  last_non_masked_idx = (sequence_length - 1) - first_max_indices
-
-  return last_non_masked_idx

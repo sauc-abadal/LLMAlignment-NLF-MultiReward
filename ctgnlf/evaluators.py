@@ -1,5 +1,6 @@
 from rouge_score import rouge_scorer
 import nltk
+nltk.download('punkt')
 
 scorer = rouge_scorer.RougeScorer(['rougeLsum'], use_stemmer=True)
 

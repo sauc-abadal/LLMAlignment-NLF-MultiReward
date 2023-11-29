@@ -1,7 +1,10 @@
 import torch
 import json
+import os
+from typing import List, Dict, Union, Tuple
 from torch.utils.data import Dataset
-from data_pool import DataPool
+from .data_pool import DataPool
+from transformers import AutoTokenizer
 
 class PromptDataset(Dataset):
     """
@@ -12,13 +15,14 @@ class PromptDataset(Dataset):
     Args:
         path (str): The path to a file containing prompt data in a specific format (e.g., JSON).
     """
-    def __init__(self, path):
+    def __init__(self, path: Union[str, os.PathLike]):
         with open(path, 'r') as file:
             data = json.load(file)
 
         self.prompts = [item["text"].strip() for item in data]
+        self.references = [item["answer"] for item in data]
 
-    def __len__(self):
+    def __len__(self) -> int:
         """
         Get the total number of prompts in the dataset.
 
@@ -27,7 +31,7 @@ class PromptDataset(Dataset):
         """
         return len(self.prompts)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict[str, str]:
         """
         Get a prompt at the specified index.
 
@@ -37,11 +41,12 @@ class PromptDataset(Dataset):
         Returns:
             dict: A dictionary containing the prompt text.
         """
-        return {'prompt': self.prompts[idx]}
+        return {'prompt': self.prompts[idx],
+                'reference': self.references[idx]}
 
 
 class PromptCollator(object):
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer: AutoTokenizer):
         """
         Initialize the PromptCollator with a tokenizer.
 
@@ -50,7 +55,7 @@ class PromptCollator(object):
         """
         self.tokenizer = tokenizer
 
-    def __call__(self, sequences):
+    def __call__(self, sequences: List[Dict[str, str]]) -> Dict[str, Union[Tuple[torch.Tensor, torch.Tensor], List[str]]]:
         """
         Collate prompts for language model input, including tokenization and padding.
 
@@ -71,7 +76,10 @@ class PromptCollator(object):
         input_ids = encodings_dict['input_ids']
         attention_mask = encodings_dict['attention_mask']
 
-        return input_ids, attention_mask
+        references = [sequence['reference'] for sequence in sequences]
+
+        return_dict = {"inputs": (input_ids, attention_mask), "references": references}
+        return return_dict
 
 
 class SequenceWithFeedbackDataset(Dataset):
@@ -87,7 +95,7 @@ class SequenceWithFeedbackDataset(Dataset):
     def __init__(self, data_pool: DataPool):
         self.queries, self.responses, self.feedback = data_pool.get_data()
 
-    def __len__(self):
+    def __len__(self) -> int:
         """
         Get the total number of sequences in the dataset.
 
@@ -96,7 +104,7 @@ class SequenceWithFeedbackDataset(Dataset):
         """
         return len(self.queries)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict[str, str]:
         """
         Get a sequence at the specified index.
 
@@ -113,7 +121,7 @@ class SequenceWithFeedbackDataset(Dataset):
 
 
 class SequenceWithFeedbackCollator(object):
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer: AutoTokenizer):
         """
         Initialize the SequenceWithFeedbackCollator with a tokenizer.
 
@@ -124,7 +132,7 @@ class SequenceWithFeedbackCollator(object):
         self.max_source_length = tokenizer.max_input_len
         self.max_target_length = tokenizer.max_generated_len
 
-    def __call__(self, sequences):
+    def __call__(self, sequences: List[Dict[str, str]]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Collate sequences for language model input, including feedback, padding, and attention masking.
 
@@ -137,7 +145,9 @@ class SequenceWithFeedbackCollator(object):
             torch.Tensor: Padded and tokenized response input IDs.
             torch.Tensor: Response input attention mask.
         """
-        queries = [self.tokenizer.feedback_prefix + sequence['feedback'] + " " + self.tokenizer.prompt_prefix + sequence['query'] for sequence in sequences]
+
+        queries = [(self.tokenizer.feedback_prefix + sequence['feedback'] + " " + self.tokenizer.prompt_prefix + sequence['query']).strip() for sequence in sequences]
+
         responses = [sequence['response'] for sequence in sequences]
 
         query_encodings_dict = self.tokenizer(queries, 

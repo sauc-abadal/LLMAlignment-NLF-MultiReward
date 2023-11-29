@@ -12,7 +12,7 @@ import torch
 import torch.nn.functional as F
 from transformers import T5ForConditionalGeneration, AutoTokenizer
 from typing import Optional, List, Iterable, Dict, Any, Tuple
-from utils import logits_to_entropy, mask_pad, find_last_non_masked_ids, NEGATIVE_INF
+from .utils import logits_to_entropy, mask_pad, NEGATIVE_INF
 
 
 class T5Policy:
@@ -20,24 +20,21 @@ class T5Policy:
     def __init__(self,
                  model_ckpt: str,
                  device,
+                 tokenizer: AutoTokenizer,
+                 bad_words_ids: List[List[int]] = None, # to avoid the generated_text IDs to contain the newly added tokens (for Quark-based)
                  temperature: float = 1.0,
-                 nlf_cond: bool = False,
                 ):
         
         self.model = T5ForConditionalGeneration.from_pretrained(model_ckpt)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_ckpt, model_max_length=1024)
-        self.tokenizer.max_input_len = 1024
-        self.tokenizer.max_generated_len = 200
+        self.tokenizer = tokenizer
         self.device = device
+        self.bad_words_ids = bad_words_ids
         self.temperature = temperature
-        self.nlf_cond = nlf_cond
-        if self.nlf_cond:
-            self.tokenizer.feedback_prefix = "feedback: "
-            self.tokenizer.prompt_prefix = "input: "
+
         self.model = self.model.to(self.device)
+        self.model.parallelize()
         self.model.eval()
-
-
+        
     def sample(self,
                prompts_input_ids: torch.Tensor, # (B, input_len)
                prompts_attention_mask: torch.Tensor, # (B, input_len)
@@ -68,6 +65,7 @@ class T5Policy:
                 top_p=top_p,
                 temperature=temperature,
                 num_return_sequences=num_return_sequences,
+                bad_words_ids=self.bad_words_ids
             ) # begins with 0 ([BOS]); ends with 1 ([EOS])
             
         else:
@@ -78,6 +76,7 @@ class T5Policy:
                 num_beams=num_beams,
                 do_sample=False,
                 num_return_sequences=num_return_sequences,
+                bad_words_ids=self.bad_words_ids
             )
 
         generated_input_ids = generated_input_ids[:, 1:].contiguous() # no beginning; ends with 1 ([EOS])

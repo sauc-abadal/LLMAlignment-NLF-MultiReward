@@ -2,7 +2,6 @@ from typing import List
 from copy import deepcopy
 from collections import defaultdict
 
-
 class DataPool:
     def __init__(self, feedback_types, num_quantiles, num_attributes):
         """
@@ -18,20 +17,16 @@ class DataPool:
 
             Quark-like:
                 num_quantiles = 5
-                num_attributes = 3
+                num_attributes = 1
                 feedback_types = [
-                    [_TREE_TOKEN_00000, _TREE_TOKEN_00001, _TREE_TOKEN_00002, _TREE_TOKEN_00003, _TREE_TOKEN_00004],
-                    [_TREE_TOKEN_00005, _TREE_TOKEN_00006, _TREE_TOKEN_00007, _TREE_TOKEN_00008, _TREE_TOKEN_00009],
-                    [_TREE_TOKEN_00010, _TREE_TOKEN_00011, _TREE_TOKEN_00012, _TREE_TOKEN_00013, _TREE_TOKEN_00014]
+                    [_TREE_TOKEN_0_0, _TREE_TOKEN_0_1, _TREE_TOKEN_0_2, _TREE_TOKEN_0_3, _TREE_TOKEN_0_4],
                 ]
             
-            NLF:
+            NLF (Factuality):
                 num_quantiles = 5
-                num_attributes = 3
+                num_attributes = 1
                 feedback_types = [
-                    [Very relevant, Majorly relevant, Moderately relevant, Slightly irrelevant, Completely irrelevant],
-                    [Very factual, Majorly factual, Moderately factual, Slightly factual, Completely factual],
-                    [Very complete, Majorly complete, Moderately complete, Slightly complete, Completely complete]
+                    [Very factual, Majorly factual, Moderately factual, Slightly non factual, Completely non factual],
                 ]
         """
         self.feedback_types = feedback_types
@@ -61,13 +56,23 @@ class DataPool:
         self.response_pool.extend(responses)
         for i, scores_list in enumerate(scores):
             self.score_pool[f"attr_{str(i)}"].extend(scores_list)
+        self.feedback_pool = ["" for _ in range(len(self.prompt_pool))]
 
         for attr_type in range(self.num_attributes):
-            data = zip(self.prompt_pool, self.response_pool, self.score_pool[f"attr_{str(attr_type)}"])
+            data = zip(self.prompt_pool, self.response_pool, self.feedback_pool, self.score_pool[f"attr_{str(attr_type)}"])
             data = [x for x in data if x[-1] is not None]
-            sorted_data = sorted(data, key=lambda x: x[-1], reverse=True) # sorted from maximum to minimum reward scores
-            self.prompt_pool, self.response_pool, self.score_pool = [list(x) for x in list(zip(*sorted_data))]
 
+            # get the sorting indices corresponding to sorting the data according to current attr_type
+            sorted_indices = [i for i, x in sorted(enumerate(data), key=lambda x: x[1][-1], reverse=True)]
+
+            # update pool of prompts, responses, feedback, and scores for current attr_type, according to current attr_type
+            sorted_data = [data[i] for i in sorted_indices]
+            self.prompt_pool, self.response_pool, self.feedback_pool, self.score_pool[f"attr_{str(attr_type)}"] = [list(x) for x in list(zip(*sorted_data))]
+            # update pool of scores for all other attr_types, according to current_attr_type
+            for j in range(self.num_attributes):
+              if j != attr_type:
+                self.score_pool[f"attr_{str(j)}"] = [self.score_pool[f"attr_{str(j)}"][i] for i in sorted_indices]
+            
             # divide data pool into quantiles of roughly equal size (last quantile will be larger if the length of the data is not 
             # divisible by the desired number of quantiles), and obtain the associated quantile index to each sample in the data pool
             quantile_idx = [[i] * (len(sorted_data) // self.num_quantiles) for i in range(self.num_quantiles)]
@@ -75,8 +80,7 @@ class DataPool:
             quantile_idx = quantile_idx + [self.num_quantiles - 1] * (len(sorted_data) - len(quantile_idx)) # append indices for the last quantile
             # e.g., quantile_idx will be [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 4, 4, 4] if currently the data pool has length 14 and we want to use 5 quantiles (the last four '4's are added as 14 % 5 != 0)
             
-            self.feedback_pool = [self.feedback_types[i] for i in quantile_idx] 
-            # feedback_pool will be a list of lists, where each element is the feedback associated to a quantile, e..g, ['Very', 'ĠPositive']
+            self.feedback_pool = [(self.feedback_pool[i] + " " + self.feedback_types[attr_type][idx]).strip() for i, idx in enumerate(quantile_idx)] 
 
     def get_data(self):
         """
