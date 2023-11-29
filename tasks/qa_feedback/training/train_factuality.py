@@ -8,6 +8,9 @@ from tqdm import tqdm
 from typing import List, Tuple, Optional, Union
 from pathlib import Path
 import time
+import sys
+import heapq
+import shutil
 
 from transformers import AutoTokenizer, get_scheduler
 import torch
@@ -22,9 +25,6 @@ from ctgnlf.datasets_and_collators import PromptDataset, PromptCollator, Sequenc
 from ctgnlf.data_pool import DataPool
 from ctgnlf.reward import MyFactualityRewardModel
 
-logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO")) # log levels, from least severe to most severe, are: DEBUG, INFO, WARNING, ERROR, and CRITICAL.
-log = logging.getLogger(__name__)
-
 # load parameters
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', required=True, help='path to config file')
@@ -33,6 +33,10 @@ args = parser.parse_args()
 # load yaml file
 with open(args.config) as f:
     args = yaml.safe_load(f)
+
+# Not working?
+# logging.basicConfig(steam=sys.stdout, level=logging.INFO) # log levels, from least severe to most severe, are: DEBUG, INFO, WARNING, ERROR, and CRITICAL.
+# log = logging.getLogger(__name__)
 
 class ConditionOnFeedbackTrainer:
     def __init__(self,
@@ -69,6 +73,9 @@ class ConditionOnFeedbackTrainer:
         self.sample_dataloader, self.sampler = None, None
         self.seq_collator = SequenceWithFeedbackCollator(tokenizer=policy.tokenizer)
 
+        self.top_models = []  # List to store top models
+        self.top_models_limit = 5
+
     def add_feedback_to_prompt_input_ids(self,
                                          input_ids: torch.Tensor,
                                          attention_mask: torch.Tensor,
@@ -95,7 +102,7 @@ class ConditionOnFeedbackTrainer:
             if best_feedback:
                 assert not feedback_quantiles, "Specify either conditioning on best feedback or on specific feedback quantiles."
                 for idx, feedback in enumerate(self.best_feedbacks):
-                    total_feedback += f"{feedback} " if idx != (len(self.best_feedbacks) - 1) else f"{feedback}." 
+                    total_feedback += f"{feedback} " if idx != (len(self.best_feedbacks) - 1) else f"{feedback}" 
             else:
                 assert feedback_quantiles and len(feedback_quantiles) == len(self.feedback_types), f"When 'best_feedback'=False, you need to specify a quantile index for each attribute you want to specify feedback (attribute 'feedback_quantiles'), i.e., {len(self.feedback_types)} "
                 assert min(feedback_quantiles) >= 0 and max(feedback_quantiles) <= (len(self.feedback_types[0]) - 1), f"Invalid quantile indexs, they need to be within the range 0..{len(self.feedback_types[0]) - 1}"
@@ -143,12 +150,11 @@ class ConditionOnFeedbackTrainer:
         if step_num % self.params['reward']['factuality_model']['sample_interval'] != 0:
             return
         
-        log.info(f"[step {step_num}] Sampling ...")
+        print(f"[step {step_num}] Sampling ...")
 
         prompts, responses = [], []
         for i, batch in enumerate(tqdm(self.train_dataloader, total=len(self.train_dataloader), desc='Sampling from current policy')):
-            if i == 20:
-                break
+
             input_ids, attention_mask = batch["inputs"]
 
             # in the first sampling phase we sample from the reference policy without conditioning on any feedback / quantile reward tokens
@@ -197,7 +203,7 @@ class ConditionOnFeedbackTrainer:
                 }
                 json.dump(response_dict, f)
                 f.write('\n')
-            
+
         sample_dataset = SequenceWithFeedbackDataset(data_pool=self.data_pool)
         self.sample_dataloader = DataLoader(
             dataset=sample_dataset,
@@ -232,7 +238,15 @@ class ConditionOnFeedbackTrainer:
         self.optimizer.step()
         self.scheduler.step()
 
-        # --- LOGGING ---
+        step_time = time.time() - step_started_at
+        eps_per_second = float(self.params['train']['training_batch_size_per_card']) / step_time
+        print(f"[step {step_num}] step_time={step_time:.2f}s, eps/s={eps_per_second:.2f}")     
+
+        # --- EVALUATION ---
+        self.policy.model.eval()
+        eval_metric = self.eval(step_num)
+
+       # --- LOGGING ---
         if self.params['logging']['wandb_log']:
             for metric in ['kl', 'entropy']:
                 wandb.log({f'Objective/{metric}': stats[f'objective/{metric}']}, step=step_num)
@@ -242,12 +256,10 @@ class ConditionOnFeedbackTrainer:
 
             wandb.log({f'Params/lr': self.optimizer.param_groups[0]['lr']}, step=step_num)
 
-        step_time = time.time() - step_started_at
-        eps_per_second = float(self.params['train']['training_batch_size_per_card']) / step_time
-        log.info(f"[step {step_num}] step_time={step_time:.2f}s, eps/s={eps_per_second:.2f}")     
-        self.save(step_num)
-        self.policy.model.eval()
-        self.eval(step_num)
+        # --- SAVING ---
+        # Save the top models
+        self.save(step_num, eval_metric)
+
     
     def loss(self, step_num, query_input_ids, query_mask, response_input_ids, response_mask):
         outputs = self.policy.forward_pass(query_input_ids, query_mask, response_input_ids, response_mask)
@@ -302,34 +314,65 @@ class ConditionOnFeedbackTrainer:
         if step_num % self.params['logging']['log_interval'] != 0:
             return
 
-        log.info(f"[step {step_num}] Printing samples examples ...")
+        print(f"[step {step_num}] Printing samples examples ...")
         for i in range(min(3, len(queries))):
             sample_kl = torch.sum((logprobs[i] - ref_logprobs[i]) * masks[i]).item()
-            log.info(f"\nSample {i+1}")
-            log.info(f"{queries[i]} |{responses[i]}")
-            log.info(f"  lm_loss = {lm_loss[i].item():+.2f}")
-            log.info(f"  kl = {sample_kl:+.2f}")
-            log.info(f"  total = {lm_loss[i].item() + self.params['env']['kl_coef'] * sample_kl:+.2f}")
+            print(f"\nSample {i+1}")
+            print(f"{queries[i]} |{responses[i]}")
+            print(f"  lm_loss = {lm_loss[i].item():+.2f}")
+            print(f"  kl = {sample_kl:+.2f}")
+            print(f"  total = {lm_loss[i].item() + self.params['env']['kl_coef'] * sample_kl:+.2f}")
 
-    def save(self, step_num):
+    def save(self, step_num, eval_metric):
         if step_num % self.params['logging']['save_interval'] != 0:
             return
-        
-        torch.save({
-            'policy_model': self.policy.model.state_dict(),
-            'optimizer': self.optimizer.state_dict(),
-            'scheduler': self.scheduler.state_dict()
-        }, f'{self.params["model_dir"]}/ckp_{step_num}.pth')
-        log.info(f"[step {step_num}] Model checkpoint saved")
 
-    def eval(self, step_num):
+        # Remove the existing save directory and recreate it
+        if os.path.exists(self.params["model_dir"]):
+            shutil.rmtree(self.params["model_dir"])
+        os.makedirs(self.params["model_dir"])
+
+        # --- TOP MODELS ---
+        if len(self.top_models) < self.top_models_limit:
+            # If the list of top models is not full, add the current model
+            heapq.heappush(self.top_models, {'eval_metric': eval_metric,
+                                             'policy_model': self.policy.model.state_dict(),
+                                             'optimizer': self.optimizer.state_dict(),
+                                             'scheduler': self.scheduler.state_dict(),
+                                             'step': step_num})
+        else:
+            # If the list is full, compare the current model with the worst (lowest metric) in the top models
+            worst_model = heapq.heappop(self.top_models)
+            if eval_metric > worst_model['eval_metric']:
+                # Replace the worst model with the current model
+                heapq.heappush(self.top_models, {'eval_metric': eval_metric,
+                                                 'policy_model': self.policy.model.state_dict(),
+                                                 'optimizer': self.optimizer.state_dict(),
+                                                 'scheduler': self.scheduler.state_dict(),
+                                                 'step': step_num})
+            else:
+                # Put the worst model back in the heap
+                heapq.heappush(self.top_models, worst_model)
+
+        for i, top_model in enumerate(sorted(self.top_models, key=lambda x: x['eval_metric'], reverse=True)):
+            # Save the top models to separate files in the save_directory (overwrite them)
+            model_filename = f'{self.params["model_dir"]}/top_model_{i}_step_{top_model["step"]}.pth'
+            torch.save({
+                'eval_metric': top_model['eval_metric'],
+                'policy_model': top_model['policy_model'],
+                'optimizer': top_model['optimizer'],
+                'scheduler': top_model['scheduler']
+            }, model_filename)
+            print(f"Saved top model {i} with metric {top_model['eval_metric']} at step {top_model['step']}")
+
+    def eval(self, step_num) -> Union[float, None]:
         if step_num % self.params['logging']['eval_interval'] != 0:
-            return
-        log.info(f"[step {step_num}] Evaluating ...")
+            return None
+        print(f"[step {step_num}] Evaluating ...")
 
         prompts, responses = [], []
         references = []
-        for i, batch in enumerate(tqdm(self.dev_dataloader, desc='Sampling from current policy')):
+        for i, batch in enumerate(tqdm(self.dev_dataloader, desc='(eval) Sampling from current policy')):
             with torch.no_grad():
                 input_ids, attention_mask = batch["inputs"]
                 references.extend(batch["references"])
@@ -369,11 +412,12 @@ class ConditionOnFeedbackTrainer:
         avg_generations_lens = np.mean(generations_lens)
         avg_rouge_scores = np.mean(rouge_scores)
 
-        log.info(f"Averaged Factuality score for all dev_set samples = {fact_scores_mean_over_num_samples:+.2f}")
-        log.info(f"Averaged Factuality score for all dev_set sentences = {fact_scores_mean_over_num_sentences:+.2f}")
-        log.info(f"Percentage of all sentences in the dev_set predicted as 'no error' = {fact_correct_ratio:+.2f}")
-        log.info(f"Average generations lenght = {avg_generations_lens:+.2f}")
-        log.info(f"Average RougeLSum = {avg_rouge_scores:+.2f}")
+        print(f"Averaged Factuality score for all dev_set samples = {fact_scores_mean_over_num_samples:+.2f}")
+        print(f"Averaged Factuality score for all dev_set sentences = {fact_scores_mean_over_num_sentences:+.2f}")
+        print(f"Percentage of all sentences in the dev_set predicted as 'no error' = {fact_correct_ratio:+.2f}")
+        print(f"Average generations lenght = {avg_generations_lens:+.2f}")
+        print(f"Average RougeLSum = {avg_rouge_scores:+.2f}")
+
         if self.params['logging']['wandb_log']:
             wandb.log({f'Evaluation/fact_scores_mean_over_num_samples': fact_scores_mean_over_num_samples}, step=step_num)
             wandb.log({f'Evaluation/fact_scores_mean_over_num_sentences': fact_scores_mean_over_num_sentences}, step=step_num)
@@ -381,6 +425,7 @@ class ConditionOnFeedbackTrainer:
             wandb.log({f'Evaluation/avg_len': avg_generations_lens}, step=step_num)
             wandb.log({f'Evaluation/avg_RougeLSum': avg_rouge_scores}, step=step_num)
 
+        return fact_correct_ratio
 
 def main():
     # set seed
@@ -390,7 +435,7 @@ def main():
     
     # set GPUs
     num_gpus = torch.cuda.device_count()
-    log.info(f'Detected {num_gpus} GPUS')
+    print(f'Detected {num_gpus} GPUS')
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     
     time = datetime.now()
@@ -409,7 +454,7 @@ def main():
     args['save_dir'] = os.path.join(args['logging']['save_dir'], date_time)
     args['reward_dir'] = os.path.join(args['save_dir'], 'reward')
     args['model_dir'] = os.path.join(args['save_dir'], 'model')
-    log.info(f"Writing to output directory: {args['save_dir']}")
+    print(f"Writing to output directory: {args['save_dir']}")
     for dir in [args['save_dir'], args['reward_dir'], args['model_dir']]:
         ensure_dir(dir)
 
@@ -418,7 +463,7 @@ def main():
         json.dump(args, f, indent=2)
     
     # initialize tokenizer, policy to be finetuned, and reference policy
-    log.info(f'Initializing models ...')
+    print(f'Initializing models ...')
     model_name_or_path = args['model']['policy_model']['ckpt']
     nlf_cond = args['env']['nlf_cond']
     num_quantiles = args['env']['num_quantiles']
@@ -435,13 +480,14 @@ def main():
         tokenizer.prompt_prefix = "input: "
         feedback_types = [
             [
-                "Perfectly correct or verifiable facts",
-                "Majorly correct or verifiable facts",
-                "Some correct or verifiable facts",
-                "Substantial incorrect or unverifiable facts",
-                "Plenty of incorrect or unverifiable facts"
+                "Most factual.",
+                "Highly factual.",
+                "Moderately factual.",
+                "Slightly factual.",
+                "Least factual."
              ],
         ]
+        bad_words_ids = None
     else:
         tokenizer.feedback_prefix = ""
         tokenizer.prompt_prefix = ""
@@ -453,17 +499,19 @@ def main():
         # add special reward tokens to the tokenizer in case of Quark-like approach
         flattened_feedback_types = [feedback for feedback_type in feedback_types for feedback in feedback_type]
         tokenizer.add_tokens(flattened_feedback_types, special_tokens=True)
+        bad_words_ids = [[tokenizer.convert_tokens_to_ids(flattened_feedback_type)] for flattened_feedback_type in flattened_feedback_types]
 
     ref_policy = T5Policy(
         model_ckpt=args['model']['ref_policy']['ckpt'],
         device=device,
-        tokenizer=tokenizer
+        tokenizer=tokenizer,
     )
 
     policy = T5Policy(
         model_ckpt=model_name_or_path,
         device=device,
-        tokenizer=tokenizer
+        tokenizer=tokenizer,
+        bad_words_ids=bad_words_ids
     )
     # resize token_embeddings associated to the newly added tokens in case of Quark-like approach
     if not nlf_cond:
@@ -491,7 +539,7 @@ def main():
     )
 
     # load datasets and dataloaders
-    log.info(f'Loading data ...')
+    print(f'Loading data ...')
     prompt_collator = PromptCollator(tokenizer=tokenizer)
 
     train_dataset = PromptDataset(path=args['data']['train_data_path'])
@@ -502,7 +550,7 @@ def main():
         drop_last=True,
         collate_fn=prompt_collator
     )
-    log.info(f"Train dataset loaded with {len(train_dataset)} samples | Train dataloader with {len(train_dataloader)} batches")
+    print(f"Train dataset loaded with {len(train_dataset)} samples | Train dataloader with {len(train_dataloader)} batches")
 
     dev_dataset = PromptDataset(path=args['data']['dev_data_path'])
     dev_dataloader = DataLoader(
@@ -512,7 +560,7 @@ def main():
         drop_last=False,
         collate_fn=prompt_collator
     )
-    log.info(f"Dev dataset loaded with {len(dev_dataset)} samples | Dev dataloader with {len(dev_dataloader)} batches")
+    print(f"Dev dataset loaded with {len(dev_dataset)} samples | Dev dataloader with {len(dev_dataloader)} batches")
     
     # prepare optimizer and schedulers
     optimizer = torch.optim.Adam(policy.model.parameters(), 
@@ -546,11 +594,10 @@ def main():
         try:
             trainer.step(step_num)
         except Exception as e:
-            log.info("There was an Exception while trying to perform trainer.step()!")
-            log.info(e)
+            print("There was an Exception while trying to perform trainer.step()!")
+            print(e)
             torch.cuda.empty_cache()
             continue
-
 if __name__ == "__main__":
     main()
 

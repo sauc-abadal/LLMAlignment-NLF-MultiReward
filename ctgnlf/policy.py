@@ -21,19 +21,20 @@ class T5Policy:
                  model_ckpt: str,
                  device,
                  tokenizer: AutoTokenizer,
+                 bad_words_ids: List[List[int]] = None, # to avoid the generated_text IDs to contain the newly added tokens (for Quark-based)
                  temperature: float = 1.0,
                 ):
         
         self.model = T5ForConditionalGeneration.from_pretrained(model_ckpt)
         self.tokenizer = tokenizer
         self.device = device
+        self.bad_words_ids = bad_words_ids
         self.temperature = temperature
 
         self.model = self.model.to(self.device)
         self.model.parallelize()
         self.model.eval()
-
-
+        
     def sample(self,
                prompts_input_ids: torch.Tensor, # (B, input_len)
                prompts_attention_mask: torch.Tensor, # (B, input_len)
@@ -64,6 +65,7 @@ class T5Policy:
                 top_p=top_p,
                 temperature=temperature,
                 num_return_sequences=num_return_sequences,
+                bad_words_ids=self.bad_words_ids
             ) # begins with 0 ([BOS]); ends with 1 ([EOS])
             
         else:
@@ -74,6 +76,7 @@ class T5Policy:
                 num_beams=num_beams,
                 do_sample=False,
                 num_return_sequences=num_return_sequences,
+                bad_words_ids=self.bad_words_ids
             )
 
         generated_input_ids = generated_input_ids[:, 1:].contiguous() # no beginning; ends with 1 ([EOS])

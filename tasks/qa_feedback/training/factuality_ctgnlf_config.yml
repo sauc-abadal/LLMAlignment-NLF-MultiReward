@@ -1,6 +1,6 @@
 model:
   policy_model:
-    ckpt: t5-small
+    ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/t5-large-1k-train
     input_padding_side: right
     train_generation_kwargs:
       do_sample: True
@@ -11,7 +11,7 @@ model:
       do_sample: False
       num_beams: 1
   ref_policy:
-    ckpt: t5-small
+    ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/t5-large-1k-train
   
   
 reward:
@@ -25,7 +25,7 @@ reward:
 env:
   max_input_len: 1024
   max_generated_len: 200
-  nlf_cond: False
+  nlf_cond: True
   num_quantiles: 5
   num_attributes: 1
   kl_coef: 0.05
@@ -33,8 +33,8 @@ env:
 
 train:
   total_episodes: 80000
-  sampling_batch_size_per_card: 1
-  training_batch_size_per_card: 1
+  sampling_batch_size_per_card: 8
+  training_batch_size_per_card: 4
   lr: 0.00001
   n_warmup_steps: 100
   clip_grad: False
@@ -48,11 +48,11 @@ data:
   test_data_path: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/data/test.json
 
 logging:
-  run_name: factuality_quark
+  run_name: factuality_ctgnlf
   wandb_log: True
   wandb_entity: sauc-abadal
   wandb_project: sauc-ms-thesis
   log_interval: 100
-  save_interval: 1000
+  save_interval: 500
   eval_interval: 500
-  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/factuality_quark
+  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/factuality_ctgnlf

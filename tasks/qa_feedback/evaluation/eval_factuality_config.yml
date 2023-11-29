@@ -1,0 +1,34 @@
+model:
+  policy_model:
+    base_model_ckpt: /cluster/work/sachan/sauc/fgrlhf/t5-large-full-train
+    model_checkpoint_ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/factuality_quark/11-27-2023_16:40:29/model/ckp_6000.pth
+    input_padding_side: right
+    eval_generation_kwargs:
+      do_sample: False
+      num_beams: 1
+
+reward:
+  factuality_model:
+    ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/fact_rm
+    batch_size: 8
+    sample_interval: 500
+    positive_reward: 0.5
+    negative_reward: -0.5
+
+env:
+  max_input_len: 1024
+  max_generated_len: 200
+  nlf_cond: False
+  num_quantiles: 5
+  num_attributes: 1
+
+eval:
+  sampling_batch_size_per_card: 8
+  seed: 42
+  cuda_deterministic: True
+
+data:
+  data_path: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/data/test.json
+
+logging:
+  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/factuality_fgrlhf_baseline
