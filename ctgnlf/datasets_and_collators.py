@@ -140,7 +140,7 @@ class SequenceWithFeedbackCollator(object):
             sequences (List[dict]): A list of sequences, each represented as a dictionary with keys 'query', 'response', and 'feedback'.
 
         Returns:
-            torch.Tensor: Padded and tokenized query input IDs with feedback prepended (tags "feedback: ", and "input: " added).
+            torch.Tensor: Padded and tokenized query input IDs with feedback prepended (tags "feedback: ", and "input: " added if nlf_cond).
             torch.Tensor: Query input attention mask with feedback accounted for.
             torch.Tensor: Padded and tokenized response input IDs.
             torch.Tensor: Response input attention mask.

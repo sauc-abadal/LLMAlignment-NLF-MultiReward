@@ -13,20 +13,24 @@ class DataPool:
             num_quantiles (int): The number of quantiles to divide the data pool into.
 
         Note:
-            The `feedback_types` list should contain feedback associated with each quantile (len(feedback_types) == num_quantiles).
+            The `feedback_types` list should contain feedback associated with each quantile (len(feedback_types[i]) == num_quantiles for all 'i').
 
             Quark-like:
                 num_quantiles = 5
-                num_attributes = 1
+                num_attributes = 3
                 feedback_types = [
                     [_TREE_TOKEN_0_0, _TREE_TOKEN_0_1, _TREE_TOKEN_0_2, _TREE_TOKEN_0_3, _TREE_TOKEN_0_4],
+                    [_TREE_TOKEN_1_0, _TREE_TOKEN_1_1, _TREE_TOKEN_1_2, _TREE_TOKEN_1_3, _TREE_TOKEN_1_4],
+                    [_TREE_TOKEN_2_0, _TREE_TOKEN_2_1, _TREE_TOKEN_2_2, _TREE_TOKEN_2_3, _TREE_TOKEN_2_4],
                 ]
             
-            NLF (Factuality):
+            NLF:
                 num_quantiles = 5
-                num_attributes = 1
+                num_attributes = 3
                 feedback_types = [
-                    [Very factual, Majorly factual, Moderately factual, Slightly non factual, Completely non factual],
+                    ["Most relevant.", "Highly relevant.", "Moderately relevant.", "Slightly relevant.", "Least relevant."],
+                    ["Most factual.", "Highly factual.", "Moderately factual.", "Slightly factual.", "Least factual."],
+                    ["Most complete.", "Highly complete.", "Moderately complete.", "Slightly complete.", "Least complete."],
                 ]
         """
         self.feedback_types = feedback_types
@@ -35,7 +39,7 @@ class DataPool:
 
         self.score_pool = defaultdict(list)
         for i in range(self.num_attributes):
-            self.score_pool[f"attr_{str(i)}"]
+            self.score_pool[f"attr_{str(i)}"] # initialize the dictionary with an empty list for every attribute
         self.prompt_pool, self.response_pool, self.feedback_pool = [], [], []
 
     def add(self, prompts: List[str], responses: List[str], scores: List[List[float]]):
@@ -56,8 +60,10 @@ class DataPool:
         self.response_pool.extend(responses)
         for i, scores_list in enumerate(scores):
             self.score_pool[f"attr_{str(i)}"].extend(scores_list)
+        # feedback_pool restarted every time we add new data to the data_pool (after sampling) as data will be associated to different quantiles (feedbacks)
         self.feedback_pool = ["" for _ in range(len(self.prompt_pool))]
 
+        # sort data iteratively according to one attribute score at a time
         for attr_type in range(self.num_attributes):
             data = zip(self.prompt_pool, self.response_pool, self.feedback_pool, self.score_pool[f"attr_{str(attr_type)}"])
             data = [x for x in data if x[-1] is not None]
