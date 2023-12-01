@@ -151,11 +151,11 @@ class Evaluator:
         data_split = args['data']['data_path'].split("/")[-1].split(".")[0]
         with open(save_dir, 'a') as f:
             f.write(f"{data_split}:\n")
-            f.write(f"Averaged Factuality score for all samples = {fact_scores_mean_over_num_samples:+.2f}\n")
-            f.write(f"Averaged Factuality score for all sentences = {fact_scores_mean_over_num_sentences:+.2f}\n")
-            f.write(f"Percentage of all sentences predicted as 'no error' = {fact_correct_ratio:+.2f}\n")
-            f.write(f"Average generations lenght = {avg_generations_lens:+.2f}\n")
-            f.write(f"Average RougeLSum = {avg_rouge_scores:+.2f}\n")
+            f.write(f"Averaged Factuality score for all samples = {fact_scores_mean_over_num_samples:+.3f}\n")
+            f.write(f"Averaged Factuality score for all sentences = {fact_scores_mean_over_num_sentences:+.3f}\n")
+            f.write(f"Percentage of all sentences predicted as 'no error' = {fact_correct_ratio:+.3f}\n")
+            f.write(f"Average generations lenght = {avg_generations_lens:+.3f}\n")
+            f.write(f"Average RougeLSum = {avg_rouge_scores:+.3f}\n")
             f.write("\n")
 
 def main():
@@ -185,12 +185,12 @@ def main():
         tokenizer.prompt_prefix = "input: "
         feedback_types = [
             [
-                "Perfectly correct or verifiable facts",
-                "Majorly correct or verifiable facts",
-                "Some correct or verifiable facts",
-                "Substantial incorrect or unverifiable facts",
-                "Plenty of incorrect or unverifiable facts"
-                ],
+                "Most factual.",
+                "Highly factual.",
+                "Moderately factual.",
+                "Slightly factual.",
+                "Least factual."
+             ],
         ]
         bad_words_ids = None
     else:
