@@ -44,7 +44,7 @@ env:
 train:
   total_episodes: 80000
   sampling_batch_size_per_card: 8
-  training_batch_size_per_card: 1
+  training_batch_size_per_card: 4
   lr: 0.00001
   n_warmup_steps: 100
   clip_grad: False
@@ -59,10 +59,10 @@ data:
 
 logging:
   run_name: multitask_quark
-  wandb_log: False
+  wandb_log: True
   wandb_entity: sauc-abadal
   wandb_project: sauc-ms-thesis
   log_interval: 100
   save_interval: 500
   eval_interval: 500
-  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_quark
+  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_quark/sampling_all_best

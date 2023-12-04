@@ -92,7 +92,7 @@ class ConditionOnFeedbackTrainer:
         if not nlf_cond: # Quark-based
             assert not feedback and not feedback_quantiles and best_feedback, "'nlf_cond'=False, i.e., Quark-based approach always conditions on best learned reward token during sampling. Do not specify other conditioning arguments."
             input_ids = torch.cat([input_ids.new([self.best_feedbacks_ids] * len(input_ids)), input_ids], dim=1)
-            attention_mask = torch.cat([attention_mask.new([[1]] * len(attention_mask)), attention_mask], dim=1)
+            attention_mask = torch.cat([attention_mask.new([[1]*self.num_attributes] * len(attention_mask)), attention_mask], dim=1)
             return (input_ids, attention_mask)
         
         prompts = tokenizer.batch_decode(input_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
@@ -158,7 +158,6 @@ class ConditionOnFeedbackTrainer:
 
         prompts, responses, prompts_feedback = [], [], []
         for i, batch in enumerate(tqdm(self.train_dataloader, total=len(self.train_dataloader), desc='Sampling from current policy')):
-
             input_ids, attention_mask = batch["inputs"]
 
             # in the first sampling phase we sample from the reference policy without conditioning on any feedback / quantile reward tokens
@@ -170,7 +169,7 @@ class ConditionOnFeedbackTrainer:
                                                   top_p=self.params['model']['policy_model']['train_generation_kwargs']['top_p'],
                                                   temperature=self.params['model']['policy_model']['train_generation_kwargs']['temperature'])
                 prompt, response = rollouts["prompts_text"], rollouts["generated_text"]
-            
+                prompt_feedback = ["" for _ in range(len(prompt))]
             # otherwise, sample from the current policy conditioning on the best feedback / quantile reward tokens
             else:
                 # preprend 'feedback: {best feedback} . input: ' (for ctg-nlf) / '{best quantile reward tokens}' (for Quark) to the prompt 
@@ -188,7 +187,7 @@ class ConditionOnFeedbackTrainer:
                                               temperature=self.params['model']['policy_model']['train_generation_kwargs']['temperature'])
                 response = rollouts["generated_text"]
                 prompt = self.decode(tokenizer=self.policy.tokenizer, query_input_ids=input_ids)
-                prompt_feedback = self.decode(tokenizer=self.policy.tokenizer, query_input_ids=input_ids_feedback)
+                prompt_feedback = self.policy.tokenizer.batch_decode(input_ids_feedback, skip_special_tokens=False)
 
             prompts.extend(prompt)
             responses.extend(response)
@@ -228,7 +227,7 @@ class ConditionOnFeedbackTrainer:
         self.policy.model.eval()
         self.sample(step_num)
         self.policy.model.train()
- 
+
         try:
             batch = next(self.sampler)
             assert len(batch[0]) == self.params['train']['training_batch_size_per_card'], 'insufficent batch'
@@ -333,9 +332,13 @@ class ConditionOnFeedbackTrainer:
             print(f"  kl = {sample_kl:+.2f}")
             print(f"  total = {lm_loss[i].item() + self.params['env']['kl_coef'] * sample_kl:+.2f}")
 
+    import heapq
+
     def save(self, step_num, eval_metric):
         if step_num % self.params['logging']['save_interval'] != 0:
             return
+
+        eval_metric = float(eval_metric)
 
         # Remove the existing save directory and recreate it
         if os.path.exists(self.params["model_dir"]):
@@ -345,26 +348,30 @@ class ConditionOnFeedbackTrainer:
         # --- TOP MODELS ---
         if len(self.top_models) < self.top_models_limit:
             # If the list of top models is not full, add the current model
-            heapq.heappush(self.top_models, {'eval_metric': eval_metric,
-                                             'policy_model': self.policy.model.state_dict(),
-                                             'optimizer': self.optimizer.state_dict(),
-                                             'scheduler': self.scheduler.state_dict(),
-                                             'step': step_num})
+            heapq.heappush(self.top_models, (eval_metric, {
+                'eval_metric': eval_metric,
+                'policy_model': self.policy.model.state_dict(),
+                'optimizer': self.optimizer.state_dict(),
+                'scheduler': self.scheduler.state_dict(),
+                'step': step_num
+            }))
         else:
             # If the list is full, compare the current model with the worst (lowest metric) in the top models
             worst_model = heapq.heappop(self.top_models)
-            if eval_metric > worst_model['eval_metric']:
+            if eval_metric > worst_model[0]:
                 # Replace the worst model with the current model
-                heapq.heappush(self.top_models, {'eval_metric': eval_metric,
-                                                 'policy_model': self.policy.model.state_dict(),
-                                                 'optimizer': self.optimizer.state_dict(),
-                                                 'scheduler': self.scheduler.state_dict(),
-                                                 'step': step_num})
+                heapq.heappush(self.top_models, (eval_metric, {
+                    'eval_metric': eval_metric,
+                    'policy_model': self.policy.model.state_dict(),
+                    'optimizer': self.optimizer.state_dict(),
+                    'scheduler': self.scheduler.state_dict(),
+                    'step': step_num
+                }))
             else:
                 # Put the worst model back in the heap
                 heapq.heappush(self.top_models, worst_model)
 
-        for i, top_model in enumerate(sorted(self.top_models, key=lambda x: x['eval_metric'], reverse=True)):
+        for i, (metric, top_model) in enumerate(sorted(self.top_models, key=lambda x: x[0], reverse=True)):
             # Save the top models to separate files in the save_directory (overwrite them)
             model_filename = f'{self.params["model_dir"]}/top_model_{i}_step_{top_model["step"]}.pth'
             torch.save({
@@ -406,7 +413,7 @@ class ConditionOnFeedbackTrainer:
         eval_output = self.score_model.get_metrics(
             prompt_texts=prompts, 
             generated_texts=responses, 
-            batch_size=self.params['reward']['factuality_model']['batch_size'],
+            batch_size=self.params['reward']['batch_size'],
             references=references
         )
         # RELEVANCY
@@ -420,7 +427,7 @@ class ConditionOnFeedbackTrainer:
 
         print(f"Averaged Relevancy score for all dev_set samples = {rel_scores_mean_over_num_samples:+.2f}")
         print(f"Averaged Relevancy score for all dev_set sentences = {rel_scores_mean_over_num_sentences:+.2f}")
-        print(f"Percentage of all subsentences in the dev_set predicted as 'no error' = {rel_correct_ratio:+.2f}")
+        print(f"(rel) Percentage of all subsentences in the dev_set predicted as 'no error' = {rel_correct_ratio:+.2f}")
 
         # FACTUALITY
         n_sentences = eval_output["n_sentences"]
@@ -433,7 +440,7 @@ class ConditionOnFeedbackTrainer:
         
         print(f"Averaged Factuality score for all dev_set samples = {fact_scores_mean_over_num_samples:+.2f}")
         print(f"Averaged Factuality score for all dev_set sentences = {fact_scores_mean_over_num_sentences:+.2f}")
-        print(f"Percentage of all sentences in the dev_set predicted as 'no error' = {fact_correct_ratio:+.2f}")
+        print(f"(fact) Percentage of all sentences in the dev_set predicted as 'no error' = {fact_correct_ratio:+.2f}")
 
         # COMPLETENESS
         comp_rewards = eval_output["comp_rewards"]

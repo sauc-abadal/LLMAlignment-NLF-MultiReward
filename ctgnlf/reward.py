@@ -471,7 +471,7 @@ class MyFineGrainedRewardModel:
 
             pbar.update(len(prompt_texts_batch))
         
-        generations_lens = [len(self.policy_tokenizer.encode(text)) for text in generated_texts]
+        generations_lens = [len(self.factuality_rm.policy_tokenizer.encode(text)) for text in generated_texts]
         rouge_scores = get_rouge_scores(generated_texts, references)
 
         output = {
