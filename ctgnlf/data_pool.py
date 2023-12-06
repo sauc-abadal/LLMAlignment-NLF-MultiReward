@@ -1,9 +1,11 @@
 from typing import List
 from copy import deepcopy
 from collections import defaultdict
+from pathlib import Path
+import json
 
 class DataPool:
-    def __init__(self, feedback_types, num_quantiles, num_attributes):
+    def __init__(self, feedback_types, num_quantiles, num_attributes, nlf_cond):
         """
         Initialize a data pool for organizing and managing data into quantiles.
 
@@ -36,6 +38,7 @@ class DataPool:
         self.feedback_types = feedback_types
         self.num_quantiles = num_quantiles
         self.num_attributes = num_attributes
+        self.nlf_cond = nlf_cond
 
         self.score_pool = defaultdict(list)
         for i in range(self.num_attributes):
@@ -86,7 +89,16 @@ class DataPool:
             quantile_idx = quantile_idx + [self.num_quantiles - 1] * (len(sorted_data) - len(quantile_idx)) # append indices for the last quantile
             # e.g., quantile_idx will be [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 4, 4, 4] if currently the data pool has length 14 and we want to use 5 quantiles (the last four '4's are added as 14 % 5 != 0)
             
-            self.feedback_pool = [(self.feedback_pool[i] + " " + self.feedback_types[attr_type][idx]).strip() for i, idx in enumerate(quantile_idx)] 
+            # --- QUARK-based ---
+            if not self.nlf_cond:
+                self.feedback_pool = [(self.feedback_pool[i] + self.feedback_types[attr_type][idx]).strip() for i, idx in enumerate(quantile_idx)]
+
+            # --- CTG NLF ---
+            else:
+                if attr_type == 0: # empty feedack_pool
+                    self.feedback_pool = [(self.feedback_pool[i] + " " + self.feedback_types[attr_type][idx]).strip() for i, idx in enumerate(quantile_idx)] 
+                else:
+                    self.feedback_pool = [(self.feedback_pool[i] + " and " + self.feedback_types[attr_type][idx]).strip() for i, idx in enumerate(quantile_idx)]
 
     def get_data(self):
         """
@@ -99,3 +111,17 @@ class DataPool:
         """
         return deepcopy(self.prompt_pool), deepcopy(self.response_pool), deepcopy(self.feedback_pool)
 
+    def save_data_for_training_in_json(self, save_path, step_num):
+        # save tuples of (prompt_feedback, promp, response, score) in reward_file
+        reward_file = Path(save_path) / f"multitask_train_data_{step_num}.json"
+        score_pool = self.score_pool
+        with reward_file.open('a') as f:
+            for idx, (prompt_feedback_data, prompt_data, response_data) in enumerate(zip(self.feedback_pool, self.prompt_pool, self.response_pool)):
+                response_dict = {
+                    'prompt_feedback': prompt_feedback_data,
+                    'prompt': prompt_data,
+                    'response': response_data,
+                    'scores': [score_pool[f"attr_{str(attr)}"][idx] for attr in range(self.num_attributes)] # i.e., for each sample [rel, fact, comp]
+                }
+                json.dump(response_dict, f)
+                f.write('\n')

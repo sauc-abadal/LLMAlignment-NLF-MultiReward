@@ -1,7 +1,7 @@
 from ctgnlf.datasets_and_collators import PromptCollator, PromptDataset
 from ctgnlf.policy import T5Policy
 from ctgnlf.utils import set_seed, ensure_dir
-from ctgnlf.reward import MyFactualityRewardModel
+from ctgnlf.reward import MyFactualityRewardModel, MyRelevancyRewardModel, MyCompletenessRewardModel, MyFineGrainedRewardModel
 
 import torch
 import numpy as np
@@ -37,10 +37,14 @@ class Evaluator:
                  dataloader: DataLoader) -> None:
         
         self.params = params
+
         self.nlf_cond = params['env']['nlf_cond']
+        self.num_quantiles = params['env']['num_quantiles']
+        self.num_attributes = params['env']['num_attributes']
+
         self.policy = policy
         self.score_model = score_model
-        self.feedback_types = feedback_types
+
         self.dataloader = dataloader
 
         self.feedback_types = feedback_types
@@ -57,32 +61,60 @@ class Evaluator:
                                          feedback_quantiles: Optional[List[int]] = None,
                                          nlf_cond: Optional[bool] = True
                                          ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # --- QUARK-based ---
         if not nlf_cond: # Quark-based
-            assert not feedback and not feedback_quantiles and best_feedback, "'nlf_cond'=False, i.e., Quark-based approach always conditions on best learned reward token during sampling. Do not specify other conditioning arguments."
-            input_ids = torch.cat([input_ids.new([self.best_feedbacks_ids] * len(input_ids)), input_ids], dim=1)
-            attention_mask = torch.cat([attention_mask.new([[1]] * len(attention_mask)), attention_mask], dim=1)
-            return (input_ids, attention_mask)
+            assert not feedback, "'nlf_cond'=False, i.e., Quark-based approach can't condition on specific NLF."
+            if best_feedback:
+                assert not feedback_quantiles, "Specify either conditioning on best feedback or on specific feedback quantiles, but not both."
+                input_ids = torch.cat([input_ids.new([self.best_feedbacks_ids] * len(input_ids)), input_ids], dim=1)
+                attention_mask = torch.cat([attention_mask.new([[1]*self.num_attributes] * len(attention_mask)), attention_mask], dim=1)
+                return (input_ids, attention_mask)
+            
+            if feedback_quantiles:
+                assert (len(feedback_quantiles) == self.num_attributes), f"When conditioning on specific quantiles, you need to specify a quantile index for each attribute you want to specify feedback for (attribute 'feedback_quantiles'), i.e., {self.num_attributes}. Set a feedback position to -1 in order to ignore the corresponding attribute.."
+                assert (min(feedback_quantiles) >= -1) and (max(feedback_quantiles) < self.num_quantiles), f"Invalid quantile indexs, they need to be within the range -1..{self.num_quantiles - 1}. -1 refers to don't condition on that attribute position."
+                total_feedback_tokens = []
+                for idx, quantile_idx in enumerate(feedback_quantiles):
+                    if quantile_idx == -1:
+                        continue
+                    total_feedback_tokens.append(self.feedback_types[idx][quantile_idx])
+                total_feedback_ids = self.policy.tokenizer.convert_tokens_to_ids(total_feedback_tokens)
+                input_ids = torch.cat([input_ids.new([total_feedback_ids] * len(input_ids)), input_ids], dim=1)
+                attention_mask = torch.cat([attention_mask.new([[1]*self.best_of_X_sampling] * len(attention_mask)), attention_mask], dim=1)
+                return (input_ids, attention_mask)
+
+            else:
+                raise Exception("Quark-based experiment but haven't specified neither conditioning on best_feedback nor on specfific feedback_quantiles.")
         
+        # --- CTG NLF ---
         prompts = tokenizer.batch_decode(input_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
 
         if feedback:
-            assert best_feedback == False and not feedback_quantiles, "You can specify either conditioning on the best feedback, on specific feedback quantiles, or providing your own feedback, but not all."
+            assert not best_feedback and not feedback_quantiles, "You can specify either conditioning on the best feedback, on specific feedback quantiles, or providing your own feedback, but not all."
             total_feedback = feedback
 
         else:
             total_feedback = ""
             if best_feedback:
-                assert not feedback_quantiles, "Specify either conditioning on best feedback or on specific feedback quantiles."
-                for idx, feedback in enumerate(self.best_feedbacks):
-                    total_feedback += f"{feedback} " if idx != (len(self.best_feedbacks) - 1) else f"{feedback}." 
+                assert not feedback_quantiles, "Specify either conditioning on best feedback or on specific feedback quantiles, but not both."
+                for idx, feedback in enumerate(self.best_feedbacks): # e.g., best_feedbacks = ["Most relevant.", "Most factual.", "Most complete."] 
+                    if total_feedback:
+                        total_feedback += f" and {feedback}" 
+                    else:
+                        total_feedback += f"{feedback}" 
             else:
-                assert feedback_quantiles and len(feedback_quantiles) == len(self.feedback_types), f"When 'best_feedback'=False, you need to specify a quantile index for each attribute you want to specify feedback (attribute 'feedback_quantiles'), i.e., {len(self.feedback_types)} "
-                assert min(feedback_quantiles) >= 0 and max(feedback_quantiles) <= (len(self.feedback_types[0]) - 1), f"Invalid quantile indexs, they need to be within the range 0..{len(self.feedback_types[0]) - 1}"
+                assert feedback_quantiles and len(feedback_quantiles) == self.num_attributes, f"When 'best_feedback'=False, you need to specify a quantile index for each attribute you want to specify feedback (attribute 'feedback_quantiles'), i.e., {self.num_attributes}"
+                assert (min(feedback_quantiles) >= -1) and (max(feedback_quantiles) < self.num_quantiles), f"Invalid quantile indexs, they need to be within the range -1..{self.num_quantiles - 1}. -1 refers to don't condition on that attribute position."
                 
-                for idx, quantile_idx in enumerate(feedback_quantiles):
-                    total_feedback += f"{self.feedback_types[idx][quantile_idx]} " if idx != (len(feedback_quantiles) - 1) else f"{self.feedback_types[idx][quantile_idx]}." 
+                for idx, quantile_idx in enumerate(feedback_quantiles): # e.g., feedback_quantiles = [0, 0, 1] -> total_feedback = "Most relevant. Most factual. Highly complete."
+                    if quantile_idx == -1:
+                        continue
+                    if total_feedback:
+                        total_feedback += f" and {self.feedback_types[idx][quantile_idx]}" 
+                    else:
+                        total_feedback += f"{self.feedback_types[idx][quantile_idx]}" 
 
-        prompts = [(tokenizer.feedback_prefix + total_feedback + " " + tokenizer.prompt_prefix + prompt).strip() for prompt in prompts]
+        prompts = [(tokenizer.feedback_prefix + total_feedback + ". " + tokenizer.prompt_prefix + prompt).strip() for prompt in prompts]
 
         input_dict = tokenizer(prompts, max_length=tokenizer.max_input_len, padding=True, truncation=True, return_tensors="pt")
         return (input_dict.input_ids, input_dict.attention_mask)
@@ -129,31 +161,55 @@ class Evaluator:
                 prompts.extend(prompt)
                 responses.extend(response)
 
-        eval_output = self.score_model.get_full_reward_batch(
+        eval_output = self.score_model.get_metrics(
             prompt_texts=prompts, 
             generated_texts=responses, 
-            batch_size=self.params['reward']['factuality_model']['batch_size'],
+            batch_size=self.params['reward']['batch_size'],
             references=references
         )
+        # RELEVANCY
+        n_sub_sentences = eval_output["n_sub_sentences"]
+        n_corrects_rel = eval_output["n_corrects_rel"]
+        rel_rewards = eval_output["rel_rewards"]
 
+        rel_scores_mean_over_num_samples = np.mean(rel_rewards) # averaged output score for all dev_set samples 
+        rel_scores_mean_over_num_sentences = np.sum(rel_rewards) / np.sum(n_sub_sentences) # averaged output score for all dev_set senteces
+        rel_correct_ratio = np.sum(n_corrects_rel) / np.sum(n_sub_sentences) # percentage of al sentences in the dev_set predicted as "no error"
+
+        # FACTUALITY
         n_sentences = eval_output["n_sentences"]
-        n_corrects = eval_output["n_corrects"]
-        pooled_rewards = eval_output["pooled_rewards"]
+        n_corrects_fact = eval_output["n_corrects_fact"]
+        fact_rewards = eval_output["fact_rewards"]
+
+        fact_scores_mean_over_num_samples = np.mean(fact_rewards) # averaged output score for all dev_set samples 
+        fact_scores_mean_over_num_sentences = np.sum(fact_rewards) / np.sum(n_sentences) # averaged output score for all dev_set senteces
+        fact_correct_ratio = np.sum(n_corrects_fact) / np.sum(n_sentences) # percentage of al sentences in the dev_set predicted as "no error"
+        
+        # COMPLETENESS
+        comp_rewards = eval_output["comp_rewards"]
+
+        comp_scores_mean_over_num_samples = np.mean(comp_rewards) # averaged output score for all dev_set samples 
+
+        # OTHERS
         generations_lens = eval_output["generations_lens"]
         rouge_scores = eval_output["rouge_scores"]
 
-        fact_scores_mean_over_num_samples = np.mean(pooled_rewards) # averaged output score for all dev_set samples 
-        fact_scores_mean_over_num_sentences = np.sum(pooled_rewards) / np.sum(n_sentences) # averaged output score for all dev_set senteces
-        fact_correct_ratio = np.sum(n_corrects) / np.sum(n_sentences) # percentage of al sentences in the dev_set predicted as "no error"
         avg_generations_lens = np.mean(generations_lens)
         avg_rouge_scores = np.mean(rouge_scores)
+
+        print(f"Average generations lenght = {avg_generations_lens:+.2f}")
+        print(f"Average RougeLSum = {avg_rouge_scores:+.2f}")
 
         data_split = args['data']['data_path'].split("/")[-1].split(".")[0]
         with open(save_dir, 'a') as f:
             f.write(f"{data_split}:\n")
-            f.write(f"Averaged Factuality score for all samples = {fact_scores_mean_over_num_samples:+.2f}\n")
-            f.write(f"Averaged Factuality score for all sentences = {fact_scores_mean_over_num_sentences:+.2f}\n")
-            f.write(f"Percentage of all sentences predicted as 'no error' = {fact_correct_ratio:+.2f}\n")
+            f.write(f"Averaged Relevancy score for all samples = {rel_scores_mean_over_num_samples:+.3f}\n")
+            f.write(f"Averaged Relevancy score for all sentences = {rel_scores_mean_over_num_sentences:+.3f}\n")
+            f.write(f"(rel) Percentage of all subsentences predicted as 'no error' = {rel_correct_ratio:+.3f}\n")
+            f.write(f"Averaged Factuality score for all samples = {fact_scores_mean_over_num_samples:+.3f}\n")
+            f.write(f"Averaged Factuality score for all sentences = {fact_scores_mean_over_num_sentences:+.3f}\n")
+            f.write(f"(fact) Percentage of all sentences predicted as 'no error' = {fact_correct_ratio:+.3f}\n")
+            f.write(f"Averaged Completeness score for all samples = {comp_scores_mean_over_num_samples:+.3f}\n")
             f.write(f"Average generations lenght = {avg_generations_lens:+.2f}\n")
             f.write(f"Average RougeLSum = {avg_rouge_scores:+.2f}\n")
             f.write("\n")
@@ -184,13 +240,30 @@ def main():
         tokenizer.feedback_prefix = "feedback: "
         tokenizer.prompt_prefix = "input: "
         feedback_types = [
+            # RELEVANCY
             [
-                "Perfectly correct or verifiable facts",
-                "Majorly correct or verifiable facts",
-                "Some correct or verifiable facts",
-                "Substantial incorrect or unverifiable facts",
-                "Plenty of incorrect or unverifiable facts"
-                ],
+                "Most relevant.",
+                "Highly relevant.",
+                "Moderately relevant.",
+                "Slightly relevant.",
+                "Least relevant."
+            ],
+            # FACTUALITY
+            [
+                "Most factual.",
+                "Highly factual.",
+                "Moderately factual.",
+                "Slightly factual.",
+                "Least factual."
+            ],
+            # COMPLETENESS
+            [
+                "Most complete.",
+                "Highly complete.",
+                "Moderately complete.",
+                "Slightly complete.",
+                "Least complete."
+            ],
         ]
         bad_words_ids = None
     else:
@@ -198,14 +271,14 @@ def main():
         tokenizer.prompt_prefix = ""
         feedback_types = [
             [f"_TREE_TOKEN_{str(attr)}_{str(quantile_idx)}"
-                for quantile_idx in range(num_quantiles)]
+             for quantile_idx in range(num_quantiles)]
         for attr in range(num_attributes)]
 
         # add special reward tokens to the tokenizer in case of Quark-like approach
         flattened_feedback_types = [feedback for feedback_type in feedback_types for feedback in feedback_type]
         tokenizer.add_tokens(flattened_feedback_types, special_tokens=True)
         bad_words_ids = [[tokenizer.convert_tokens_to_ids(flattened_feedback_type)] for flattened_feedback_type in flattened_feedback_types]
-    
+
     policy = T5Policy(
         model_ckpt=args['model']['policy_model']['base_model_ckpt'],
         device=device,
@@ -231,13 +304,33 @@ def main():
         log.info("Model checkpoint loaded!")
 
     # initialize reward model and data pool
-    reward_model = MyFactualityRewardModel(
+    relevancy_rm = MyRelevancyRewardModel(
+        policy_tokenizer=tokenizer,
+        reward_model_name_or_path=args['reward']['relevancy_model']['ckpt'],
+        device=device,
+        positive_reward=args['reward']['relevancy_model']['positive_reward'],
+        negative_reward=args['reward']['relevancy_model']['negative_reward']
+    )
+
+    factuality_rm = MyFactualityRewardModel(
         policy_tokenizer=tokenizer,
         reward_model_name_or_path=args['reward']['factuality_model']['ckpt'],
         device=device,
-        factuality_positive_reward=args['reward']['factuality_model']['positive_reward'],
-        factuality_negative_reward=args['reward']['factuality_model']['negative_reward']
+        positive_reward=args['reward']['factuality_model']['positive_reward'],
+        negative_reward=args['reward']['factuality_model']['negative_reward']
     )
+
+    completeness_rm = MyCompletenessRewardModel(
+        policy_tokenizer=tokenizer,
+        reward_model_name_or_path=args['reward']['completeness_model']['ckpt'],
+        device=device,
+        mean=args['reward']['completeness_model']['mean'],
+        std=args['reward']['completeness_model']['std'],
+        bias=args['reward']['completeness_model']['bias'],
+        scale=args['reward']['completeness_model']['scale']
+    )
+
+    reward_model = MyFineGrainedRewardModel(relevancy_rm, factuality_rm, completeness_rm)
 
     prompt_collator = PromptCollator(tokenizer=tokenizer)
     dataset = PromptDataset(path=args['data']['data_path'])
