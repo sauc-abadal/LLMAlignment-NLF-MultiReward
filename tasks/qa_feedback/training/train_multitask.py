@@ -11,6 +11,7 @@ import time
 import sys
 import heapq
 import shutil
+from copy import deepcopy
 
 from transformers import AutoTokenizer, get_scheduler
 import torch
@@ -426,9 +427,9 @@ class ConditionOnFeedbackTrainer:
             # If the list of top models is not full, add the current model
             heapq.heappush(self.top_models, (eval_metric, {
                 'eval_metric': eval_metric,
-                'policy_model': self.policy.model.state_dict(),
-                'optimizer': self.optimizer.state_dict(),
-                'scheduler': self.scheduler.state_dict(),
+                'policy_model': deepcopy(self.to_cpu(self.policy.model.state_dict())),
+                'optimizer': deepcopy(self.to_cpu(self.optimizer.state_dict())),
+                'scheduler': deepcopy(self.to_cpu(self.scheduler.state_dict())),
                 'step': step_num
             }))
         else:
@@ -438,9 +439,9 @@ class ConditionOnFeedbackTrainer:
                 # Replace the worst model with the current model
                 heapq.heappush(self.top_models, (eval_metric, {
                     'eval_metric': eval_metric,
-                    'policy_model': self.policy.model.state_dict(),
-                    'optimizer': self.optimizer.state_dict(),
-                    'scheduler': self.scheduler.state_dict(),
+                    'policy_model': deepcopy(self.to_cpu(self.policy.model.state_dict())),
+                    'optimizer': deepcopy(self.to_cpu(self.optimizer.state_dict())),
+                    'scheduler': deepcopy(self.to_cpu(self.scheduler.state_dict())),
                     'step': step_num
                 }))
             else:
@@ -457,6 +458,16 @@ class ConditionOnFeedbackTrainer:
                 'scheduler': top_model['scheduler']
             }, model_filename)
             print(f"Saved top model {i} with metric {top_model['eval_metric']} at step {top_model['step']}")
+
+    def to_cpu(self, obj):
+        if isinstance(obj, torch.Tensor):
+            return obj.detach().cpu()
+        elif isinstance(obj, dict):
+            return {key: self.to_cpu(value) for key, value in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self.to_cpu(item) for item in obj]
+        else:
+            return obj
 
     def eval(self, step_num) -> Union[float, None]:
         if step_num % self.params['logging']['eval_interval'] != 0:
@@ -618,27 +629,27 @@ def main():
         feedback_types = [
             # RELEVANCY
             [
-                "Most relevant.",
-                "Highly relevant.",
-                "Moderately relevant.",
-                "Slightly relevant.",
-                "Least relevant."
+                "Most relevant",
+                "Highly relevant",
+                "Moderately relevant",
+                "Slightly relevant",
+                "Least relevant"
             ],
             # FACTUALITY
             [
-                "Most factual.",
-                "Highly factual.",
-                "Moderately factual.",
-                "Slightly factual.",
-                "Least factual."
+                "Most factual",
+                "Highly factual",
+                "Moderately factual",
+                "Slightly factual",
+                "Least factual"
             ],
             # COMPLETENESS
             [
-                "Most complete.",
-                "Highly complete.",
-                "Moderately complete.",
-                "Slightly complete.",
-                "Least complete."
+                "Most complete",
+                "Highly complete",
+                "Moderately complete",
+                "Slightly complete",
+                "Least complete"
             ],
         ]
         bad_words_ids = None

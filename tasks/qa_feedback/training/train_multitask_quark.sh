@@ -5,7 +5,7 @@
 #SBATCH --gpus=a100_80gb:1
 #SBATCH --mem-per-cpu=16384
 #SBATCH --time=24:00:00
-#SBATCH --output="tasks/qa_feedback/model_outputs/multitask_quark/sampling_one_best/training_v0.out"
+#SBATCH --output="tasks/qa_feedback/model_outputs/multitask_quark/sampling_one_best_v2/training_v0.out"
 #SBATCH --open-mode=append
 
 module load eth_proxy

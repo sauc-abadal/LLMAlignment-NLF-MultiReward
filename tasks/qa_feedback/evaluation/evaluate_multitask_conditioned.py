@@ -197,9 +197,6 @@ class Evaluator:
         avg_generations_lens = np.mean(generations_lens)
         avg_rouge_scores = np.mean(rouge_scores)
 
-        print(f"Average generations lenght = {avg_generations_lens:+.2f}")
-        print(f"Average RougeLSum = {avg_rouge_scores:+.2f}")
-
         data_split = args['data']['data_path'].split("/")[-1].split(".")[0]
         with open(save_dir, 'a') as f:
             f.write(f"{data_split}:\n")
@@ -242,27 +239,27 @@ def main():
         feedback_types = [
             # RELEVANCY
             [
-                "Most relevant.",
-                "Highly relevant.",
-                "Moderately relevant.",
-                "Slightly relevant.",
-                "Least relevant."
+                "Most relevant",
+                "Highly relevant",
+                "Moderately relevant",
+                "Slightly relevant",
+                "Least relevant"
             ],
             # FACTUALITY
             [
-                "Most factual.",
-                "Highly factual.",
-                "Moderately factual.",
-                "Slightly factual.",
-                "Least factual."
+                "Most factual",
+                "Highly factual",
+                "Moderately factual",
+                "Slightly factual",
+                "Least factual"
             ],
             # COMPLETENESS
             [
-                "Most complete.",
-                "Highly complete.",
-                "Moderately complete.",
-                "Slightly complete.",
-                "Least complete."
+                "Most complete",
+                "Highly complete",
+                "Moderately complete",
+                "Slightly complete",
+                "Least complete"
             ],
         ]
         bad_words_ids = None

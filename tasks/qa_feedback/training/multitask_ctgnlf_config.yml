@@ -38,9 +38,9 @@ env:
   nlf_cond: True
   num_quantiles: 5
   num_attributes: 3
-  cond_on_feedback_quantiles: False
+  cond_on_feedback_quantiles: True
   cond_on_best_quantiles: True
-  best_of_X_sampling: 3
+  best_of_X_sampling: 2
   kl_coef: 0.05
   entropy_coef: 0.06
 
@@ -61,11 +61,11 @@ data:
   test_data_path: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/data/test.json
 
 logging:
-  run_name: multitask_ctgnlf_bestOfAll
+  run_name: multitask_ctgnlf_bestOf2
   wandb_log: True
   wandb_entity: sauc-abadal
   wandb_project: sauc-ms-thesis
   log_interval: 100
   save_interval: 500
   eval_interval: 500
-  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_all_best
+  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_two_best_v2

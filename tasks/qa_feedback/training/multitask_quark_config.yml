@@ -68,4 +68,4 @@ logging:
   log_interval: 100
   save_interval: 500
   eval_interval: 500
-  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_quark/sampling_one_best
+  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_quark/sampling_one_best_v2

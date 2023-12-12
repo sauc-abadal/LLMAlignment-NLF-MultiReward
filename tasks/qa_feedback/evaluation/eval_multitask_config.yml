@@ -1,7 +1,7 @@
 model:
   policy_model:
     base_model_ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/t5-large-1k-train
-    model_checkpoint_ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_quark/sampling_two_best/12-04-2023_19:13:43/model/top_model_1_step_11000.pth
+    model_checkpoint_ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_two_best/12-08-2023_11:06:57/model/top_model_0_step_9500.pth
     input_padding_side: right
     eval_generation_kwargs:
       do_sample: False
@@ -27,7 +27,7 @@ reward:
 env:
   max_input_len: 1024
   max_generated_len: 200
-  nlf_cond: False
+  nlf_cond: True
   num_quantiles: 5
   num_attributes: 3
 
@@ -40,4 +40,4 @@ data:
   data_path: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/data/test.json
 
 logging:
-  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_quark/sampling_two_best/12-04-2023_19:13:43
+  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_two_best/12-08-2023_11:06:57

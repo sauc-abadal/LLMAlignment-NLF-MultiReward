@@ -154,6 +154,12 @@ def main():
         tokenizer=tokenizer,
     )
 
+    model_name_or_path = args['model']['policy_model']['model_checkpoint_ckpt']
+    if model_name_or_path is not None:
+        checkpoint = torch.load(model_name_or_path, map_location='cpu')
+        policy.model.load_state_dict(checkpoint)
+        log.info("Model checkpoint loaded!")
+
     # initialize reward model and data pool
     relevancy_rm = MyRelevancyRewardModel(
         policy_tokenizer=tokenizer,
