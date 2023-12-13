@@ -420,14 +420,9 @@ class ConditionOnFeedbackTrainer:
 
         eval_metric = float(eval_metric)
 
-        # Remove the existing save directory and recreate it
-        if os.path.exists(self.params["model_dir"]):
-            shutil.rmtree(self.params["model_dir"])
-        os.makedirs(self.params["model_dir"])
-
         # --- TOP MODELS ---
         if len(self.top_models) < self.top_models_limit:
-            model_filename = f'{self.params["model_dir"]}/model_metric_{eval_metric}_step_{top_model["step"]}.pth'
+            model_filename = f'{self.params["model_dir"]}/model_metric_{eval_metric}_step_{step_num}.pth'
             # If the list of top models is not full, add the current model to the queue
             heapq.heappush(self.top_models, (eval_metric, {
                 'eval_metric': eval_metric,
@@ -456,6 +451,7 @@ class ConditionOnFeedbackTrainer:
                 else:
                     print(f"The checkpoint {worst_model_filename} does not exist.")
 
+                model_filename = f'{self.params["model_dir"]}/model_metric_{eval_metric}_step_{step_num}.pth'
                 # Replace the worst model in the queue with the current model
                 heapq.heappush(self.top_models, (eval_metric, {
                     'eval_metric': eval_metric,
