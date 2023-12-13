@@ -273,21 +273,24 @@ class ConditionOnFeedbackTrainer:
         # their scores and then assigns feedback to them
         self.data_pool.add(prompts=prompts, responses=responses, scores=scores)
 
-        # save tuples of (prompt_feedback, promp, response, score) in reward_file (feedback used for sampling)
-        reward_file = Path(self.params['reward_dir']) / f"multitask_rewards_{step_num}.json"
-        with reward_file.open('a') as f:
-            for idx, (prompt_feedback_data, prompt_data, response_data) in enumerate(zip(prompts_feedback, prompts, responses)):
-                response_dict = {
-                    'prompt_feedback': prompt_feedback_data,
-                    'prompt': prompt_data,
-                    'response': response_data,
-                    'scores': [scores[attr][idx] for attr in range(self.num_attributes)] # i.e., for each sample [rel, fact, comp]
-                }
-                json.dump(response_dict, f)
-                f.write('\n')
 
-        # save tuples of (prompt_feedback, promp, response, score) in reward_file (feedback used during training), mainly for data inspection
-        self.data_pool.save_data_for_training_in_json(self.params['reward_dir'], step_num)
+        # save sampling data and training data in json files for inspection (just for 1st and 2nd sampling steps)
+        if step_num in [0, self.params['env']['sample_interval']]:
+            # save tuples of (prompt_feedback, promp, response, score) in reward_file (feedback used for sampling)
+            reward_file = Path(self.params['reward_dir']) / f"multitask_rewards_{step_num}.json"
+            with reward_file.open('a') as f:
+                for idx, (prompt_feedback_data, prompt_data, response_data) in enumerate(zip(prompts_feedback, prompts, responses)):
+                    response_dict = {
+                        'prompt_feedback': prompt_feedback_data,
+                        'prompt': prompt_data,
+                        'response': response_data,
+                        'scores': [scores[attr][idx] for attr in range(self.num_attributes)] # i.e., for each sample [rel, fact, comp]
+                    }
+                    json.dump(response_dict, f)
+                    f.write('\n')
+
+            # save tuples of (prompt_feedback, promp, response, score) in reward_file (feedback used during training), mainly for data inspection
+            self.data_pool.save_data_for_training_in_json(self.params['reward_dir'], step_num)
 
         sample_dataset = SequenceWithFeedbackDataset(data_pool=self.data_pool)
         self.sample_dataloader = DataLoader(
@@ -424,50 +427,53 @@ class ConditionOnFeedbackTrainer:
 
         # --- TOP MODELS ---
         if len(self.top_models) < self.top_models_limit:
-            # If the list of top models is not full, add the current model
+            model_filename = f'{self.params["model_dir"]}/model_metric_{eval_metric}_step_{top_model["step"]}.pth'
+            # If the list of top models is not full, add the current model to the queue
             heapq.heappush(self.top_models, (eval_metric, {
                 'eval_metric': eval_metric,
-                'policy_model': deepcopy(self.to_cpu(self.policy.model.state_dict())),
-                'optimizer': deepcopy(self.to_cpu(self.optimizer.state_dict())),
-                'scheduler': deepcopy(self.to_cpu(self.scheduler.state_dict())),
+                'model_name': model_filename,
                 'step': step_num
             }))
+            # Save model checkpoint to disk
+            torch.save({
+                'eval_metric': eval_metric,
+                'policy_model': self.policy.model.state_dict(),
+                'optimizer': self.optimizer.state_dict(),
+                'scheduler': self.scheduler.state_dict(),
+                'step': step_num
+            }, model_filename)
+            print(f"Saved checkpoint with metric {eval_metric} at step {step_num}")
         else:
-            # If the list is full, compare the current model with the worst (lowest metric) in the top models
+            # If the list is full, compare the current model with the worst (lowest metric) in the top models queue
             worst_model = heapq.heappop(self.top_models)
+
             if eval_metric > worst_model[0]:
-                # Replace the worst model with the current model
+                # Remove worst model checkpoint from disk
+                worst_model_filename = worst_model[1]['model_name']
+                if os.path.exists(worst_model_filename):
+                    os.remove(worst_model_filename)
+                    print(f"The checkpoint {worst_model_filename} has been removed.")
+                else:
+                    print(f"The checkpoint {worst_model_filename} does not exist.")
+
+                # Replace the worst model in the queue with the current model
                 heapq.heappush(self.top_models, (eval_metric, {
                     'eval_metric': eval_metric,
-                    'policy_model': deepcopy(self.to_cpu(self.policy.model.state_dict())),
-                    'optimizer': deepcopy(self.to_cpu(self.optimizer.state_dict())),
-                    'scheduler': deepcopy(self.to_cpu(self.scheduler.state_dict())),
+                    'model_name': model_filename,
                     'step': step_num
                 }))
+                # Save model checkpoint to disk
+                torch.save({
+                    'eval_metric': eval_metric,
+                    'policy_model': self.policy.model.state_dict(),
+                    'optimizer': self.optimizer.state_dict(),
+                    'scheduler': self.scheduler.state_dict(),
+                    'step': step_num
+                }, model_filename)
+                print(f"Saved checkpoint with metric {eval_metric} at step {step_num}")
             else:
-                # Put the worst model back in the heap
+                # Put the worst model back in the heap queue (it hasn't been erased from disk)
                 heapq.heappush(self.top_models, worst_model)
-
-        for i, (metric, top_model) in enumerate(sorted(self.top_models, key=lambda x: x[0], reverse=True)):
-            # Save the top models to separate files in the save_directory (overwrite them)
-            model_filename = f'{self.params["model_dir"]}/top_model_{i}_step_{top_model["step"]}.pth'
-            torch.save({
-                'eval_metric': top_model['eval_metric'],
-                'policy_model': top_model['policy_model'],
-                'optimizer': top_model['optimizer'],
-                'scheduler': top_model['scheduler']
-            }, model_filename)
-            print(f"Saved top model {i} with metric {top_model['eval_metric']} at step {top_model['step']}")
-
-    def to_cpu(self, obj):
-        if isinstance(obj, torch.Tensor):
-            return obj.detach().cpu()
-        elif isinstance(obj, dict):
-            return {key: self.to_cpu(value) for key, value in obj.items()}
-        elif isinstance(obj, (list, tuple)):
-            return [self.to_cpu(item) for item in obj]
-        else:
-            return obj
 
     def eval(self, step_num) -> Union[float, None]:
         if step_num % self.params['logging']['eval_interval'] != 0:
