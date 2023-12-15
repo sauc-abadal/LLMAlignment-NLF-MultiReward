@@ -188,7 +188,7 @@ class Evaluator:
         # COMPLETENESS
         comp_rewards = eval_output["comp_rewards"]
 
-        comp_scores_mean_over_num_samples = np.mean(comp_rewards) # averaged output score for all dev_set samples 
+        comp_scores_mean_over_num_samples = np.mean(comp_rewards)/0.3 # averaged output score for all dev_set samples 
 
         # OTHERS
         generations_lens = eval_output["generations_lens"]
@@ -199,6 +199,7 @@ class Evaluator:
 
         data_split = args['data']['data_path'].split("/")[-1].split(".")[0]
         with open(save_dir, 'a') as f:
+            f.write(f"------{args['model']['policy_model']['model_checkpoint_ckpt'].split('/')[-1]}------\n")
             f.write(f"{data_split}:\n")
             f.write(f"Averaged Relevancy score for all samples = {rel_scores_mean_over_num_samples:+.3f}\n")
             f.write(f"Averaged Relevancy score for all sentences = {rel_scores_mean_over_num_sentences:+.3f}\n")

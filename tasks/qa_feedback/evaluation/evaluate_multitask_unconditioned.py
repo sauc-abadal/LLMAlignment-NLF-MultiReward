@@ -103,7 +103,7 @@ class Evaluator:
         # COMPLETENESS
         comp_rewards = eval_output["comp_rewards"]
 
-        comp_scores_mean_over_num_samples = np.mean(comp_rewards) # averaged output score for all dev_set samples 
+        comp_scores_mean_over_num_samples = np.mean(comp_rewards)/0.3 # averaged output score for all dev_set samples 
 
         # OTHERS
         generations_lens = eval_output["generations_lens"]

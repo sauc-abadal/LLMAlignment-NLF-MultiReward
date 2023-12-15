@@ -1,7 +1,7 @@
 model:
   policy_model:
     base_model_ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/t5-large-1k-train
-    model_checkpoint_ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_two_best/12-08-2023_11:06:57/model/top_model_0_step_9500.pth
+    model_checkpoint_ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_bestOf3/12-14-2023_10:24:52/model/model_metric_0.6245634789348492_step_12500.pth
     input_padding_side: right
     eval_generation_kwargs:
       do_sample: False
@@ -40,4 +40,4 @@ data:
   data_path: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/data/test.json
 
 logging:
-  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_two_best/12-08-2023_11:06:57
+  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_bestOf3/12-14-2023_10:24:52
