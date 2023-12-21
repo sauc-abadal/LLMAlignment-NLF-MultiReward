@@ -153,6 +153,73 @@ class ConditionOnFeedbackTrainer:
         input_dict = tokenizer(prompts, max_length=tokenizer.max_input_len, padding=True, truncation=True, return_tensors="pt")
         return (input_dict.input_ids, input_dict.attention_mask)
     
+    def add_feedback_to_prompt_input_ids_v2(self,
+                                         input_ids: torch.Tensor,
+                                         attention_mask: torch.Tensor,
+                                         tokenizer: AutoTokenizer,
+                                         feedback: Optional[str] = None,
+                                         best_feedback: Optional[bool] = True,
+                                         feedback_quantiles: Optional[List[int]] = None,
+                                         nlf_cond: Optional[bool] = True
+                                         ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # --- QUARK-based ---
+        if not nlf_cond: # Quark-based
+            assert not feedback, "'nlf_cond'=False, i.e., Quark-based approach can't condition on specific NLF."
+            if best_feedback:
+                assert not feedback_quantiles, "Specify either conditioning on best feedback or on specific feedback quantiles, but not both."
+                input_ids = torch.cat([input_ids.new([self.best_feedbacks_ids] * len(input_ids)), input_ids], dim=1)
+                attention_mask = torch.cat([attention_mask.new([[1]*self.num_attributes] * len(attention_mask)), attention_mask], dim=1)
+                return (input_ids, attention_mask)
+            
+            if feedback_quantiles:
+                assert (len(feedback_quantiles) == self.num_attributes), f"When conditioning on specific quantiles, you need to specify a quantile index for each attribute you want to specify feedback for (attribute 'feedback_quantiles'), i.e., {self.num_attributes}. Set a feedback position to -1 in order to ignore the corresponding attribute.."
+                assert (min(feedback_quantiles) >= -1) and (max(feedback_quantiles) < self.num_quantiles), f"Invalid quantile indexs, they need to be within the range -1..{self.num_quantiles - 1}. -1 refers to don't condition on that attribute position."
+                total_feedback_tokens = []
+                for idx, quantile_idx in enumerate(feedback_quantiles):
+                    if quantile_idx == -1:
+                        continue
+                    total_feedback_tokens.append(self.feedback_types[idx][quantile_idx])
+                total_feedback_ids = self.policy.tokenizer.convert_tokens_to_ids(total_feedback_tokens)
+                input_ids = torch.cat([input_ids.new([total_feedback_ids] * len(input_ids)), input_ids], dim=1)
+                attention_mask = torch.cat([attention_mask.new([[1]*self.num_attributes] * len(attention_mask)), attention_mask], dim=1)
+                return (input_ids, attention_mask)
+
+            else:
+                raise Exception("Quark-based experiment but haven't specified neither conditioning on best_feedback nor on specfific feedback_quantiles.")
+        
+        # --- CTG NLF ---
+        prompts = tokenizer.batch_decode(input_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+
+        if feedback:
+            assert not best_feedback and not feedback_quantiles, "You can specify either conditioning on the best feedback, on specific feedback quantiles, or providing your own feedback, but not all."
+            total_feedback = feedback
+
+        else:
+            total_feedback = ""
+            if best_feedback:
+                assert not feedback_quantiles, "Specify either conditioning on best feedback or on specific feedback quantiles, but not both."
+                for idx, feedback in enumerate(self.best_feedbacks): # e.g., best_feedbacks = ["Most relevant.", "Most factual.", "Most complete."] 
+                    if total_feedback:
+                        total_feedback += f" and {feedback}" 
+                    else:
+                        total_feedback += f"{feedback}" 
+            else:
+                assert feedback_quantiles and len(feedback_quantiles) == self.num_attributes, f"When 'best_feedback'=False, you need to specify a quantile index for each attribute you want to specify feedback (attribute 'feedback_quantiles'), i.e., {self.num_attributes}"
+                assert (min(feedback_quantiles) >= -1) and (max(feedback_quantiles) < self.num_quantiles), f"Invalid quantile indexs, they need to be within the range -1..{self.num_quantiles - 1}. -1 refers to don't condition on that attribute position."
+                
+                for idx, quantile_idx in enumerate(feedback_quantiles): # e.g., feedback_quantiles = [0, 0, 1] -> total_feedback = "Most relevant. Most factual. Highly complete."
+                    if quantile_idx == -1:
+                        continue
+                    if total_feedback:
+                        total_feedback += f" and {self.feedback_types[idx][quantile_idx]}" 
+                    else:
+                        total_feedback += f"{self.feedback_types[idx][quantile_idx]}" 
+
+        prompts = [(tokenizer.feedback_prefix + total_feedback + ". " + tokenizer.prompt_prefix + prompt).strip() for prompt in prompts]
+
+        input_dict = tokenizer(prompts, max_length=tokenizer.max_input_len, padding=True, truncation=True, return_tensors="pt")
+        return (input_dict.input_ids, input_dict.attention_mask)
+    
     def remove_any_feedback_from_prompt_input_ids(self,
                                                   input_ids: torch.Tensor,
                                                   attention_mask: torch.Tensor,
@@ -203,6 +270,27 @@ class ConditionOnFeedbackTrainer:
                 feedback_quantiles[index] = random.sample(range(num_quantiles), 1)
         
         return feedback_quantiles
+    
+    def get_feedback_quantiles_v2(self, num_attributes, num_quantiles, best_of_X_sampling, cond_on_best_quantiles=True):
+        
+        if cond_on_best_quantiles: # bestOfX attributes set to best quantiles, rest drawn at random
+            # Create a list with all elements initialized to -1
+            feedback_quantiles = [-1] * num_attributes
+            
+            # Randomly select 'num' indices to set to 0 (sampled from best quantile)
+            sampled_indices = random.sample(range(num_attributes), best_of_X_sampling)
+
+            # Set the selected indices to 0
+            for index in sampled_indices:
+                feedback_quantiles[index] = 0
+
+            # Set the remaining indices to 0..num_quantiles-1 at random
+            feedback_quantiles = [quantile if quantile == 0 else random.sample(range(num_quantiles), 1)[0] for quantile in feedback_quantiles]
+                
+        else: # all attributes set to random quantiles
+            feedback_quantiles = [random.sample(range(num_quantiles), 1)[0] for _ in range(num_attributes)]
+        
+        return feedback_quantiles
 
     def sample(self, step_num):
         if step_num % self.params['env']['sample_interval'] != 0:
@@ -228,14 +316,14 @@ class ConditionOnFeedbackTrainer:
             else:
             # preprend 'feedback: {best feedback} . input: ' (for ctg-nlf) / '{best quantile reward tokens}' (for Quark) to the prompt 
                 if self.cond_on_feedback_quantiles:
-                    feedback_quantiles = self.get_feedback_quantiles(
+                    feedback_quantiles = self.get_feedback_quantiles_v2(
                         num_attributes=self.num_attributes,
                         num_quantiles=self.num_quantiles,
                         best_of_X_sampling=self.best_of_X_sampling,
                         cond_on_best_quantiles=self.cond_on_best_quantiles
                     )
                 
-                    input_ids_feedback, attention_mask = self.add_feedback_to_prompt_input_ids(
+                    input_ids_feedback, attention_mask = self.add_feedback_to_prompt_input_ids_v2(
                         input_ids=input_ids, attention_mask=attention_mask,
                         tokenizer=self.policy.tokenizer,
                         feedback = None,
@@ -244,7 +332,7 @@ class ConditionOnFeedbackTrainer:
                         nlf_cond=self.nlf_cond
                     )
                 else:
-                    input_ids_feedback, attention_mask = self.add_feedback_to_prompt_input_ids(
+                    input_ids_feedback, attention_mask = self.add_feedback_to_prompt_input_ids_v2(
                         input_ids=input_ids, attention_mask=attention_mask,
                         tokenizer=self.policy.tokenizer,
                         feedback = None,
