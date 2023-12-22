@@ -133,7 +133,7 @@ class ConditionOnFeedbackTrainer:
                 assert not feedback_quantiles, "Specify either conditioning on best feedback or on specific feedback quantiles, but not both."
                 for idx, feedback in enumerate(self.best_feedbacks): # e.g., best_feedbacks = ["Most relevant.", "Most factual.", "Most complete."] 
                     if total_feedback:
-                        total_feedback += f" and {feedback}" 
+                        total_feedback += f", and {feedback}" 
                     else:
                         total_feedback += f"{feedback}" 
             else:
@@ -144,7 +144,7 @@ class ConditionOnFeedbackTrainer:
                     if quantile_idx == -1:
                         continue
                     if total_feedback:
-                        total_feedback += f" and {self.feedback_types[idx][quantile_idx]}" 
+                        total_feedback += f", and {self.feedback_types[idx][quantile_idx]}" 
                     else:
                         total_feedback += f"{self.feedback_types[idx][quantile_idx]}" 
 
@@ -200,7 +200,7 @@ class ConditionOnFeedbackTrainer:
                 assert not feedback_quantiles, "Specify either conditioning on best feedback or on specific feedback quantiles, but not both."
                 for idx, feedback in enumerate(self.best_feedbacks): # e.g., best_feedbacks = ["Most relevant.", "Most factual.", "Most complete."] 
                     if total_feedback:
-                        total_feedback += f" and {feedback}" 
+                        total_feedback += f", and {feedback}" 
                     else:
                         total_feedback += f"{feedback}" 
             else:
@@ -211,7 +211,7 @@ class ConditionOnFeedbackTrainer:
                     if quantile_idx == -1:
                         continue
                     if total_feedback:
-                        total_feedback += f" and {self.feedback_types[idx][quantile_idx]}" 
+                        total_feedback += f", and {self.feedback_types[idx][quantile_idx]}" 
                     else:
                         total_feedback += f"{self.feedback_types[idx][quantile_idx]}" 
 
@@ -719,27 +719,21 @@ def main():
         feedback_types = [
             # RELEVANCY
             [
-                "Most relevant",
-                "Highly relevant",
-                "Moderately relevant",
-                "Slightly relevant",
-                "Least relevant"
+                "relevant",
+                "some irrelevancies",
+                "irrelevant",
             ],
             # FACTUALITY
             [
-                "Most factual",
-                "Highly factual",
-                "Moderately factual",
-                "Slightly factual",
-                "Least factual"
+                "factual",
+                "some inaccuracies",
+                "very inaccurate",
             ],
             # COMPLETENESS
             [
-                "Most complete",
-                "Highly complete",
-                "Moderately complete",
-                "Slightly complete",
-                "Least complete"
+                "complete",
+                "some details missing",
+                "incomplete",
             ],
         ]
         bad_words_ids = None
