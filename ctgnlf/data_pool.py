@@ -98,7 +98,7 @@ class DataPool:
                 if attr_type == 0: # empty feedack_pool
                     self.feedback_pool = [(self.feedback_pool[i] + " " + self.feedback_types[attr_type][idx]).strip() for i, idx in enumerate(quantile_idx)] 
                 else:
-                    self.feedback_pool = [(self.feedback_pool[i] + " and " + self.feedback_types[attr_type][idx]).strip() for i, idx in enumerate(quantile_idx)]
+                    self.feedback_pool = [(self.feedback_pool[i] + ", and " + self.feedback_types[attr_type][idx]).strip() for i, idx in enumerate(quantile_idx)]
 
     def get_data(self):
         """
