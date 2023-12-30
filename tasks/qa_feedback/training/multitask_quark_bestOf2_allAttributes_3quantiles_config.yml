@@ -1,0 +1,71 @@
+model:
+  policy_model:
+    ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/t5-large-1k-train
+    input_padding_side: right
+    train_generation_kwargs:
+      do_sample: True
+      top_k: 20
+      top_p: null
+      temperature: 0.7
+    eval_generation_kwargs:
+      do_sample: False
+      num_beams: 1
+  ref_policy:
+    ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/t5-large-1k-train
+  
+  
+reward:
+  batch_size: 8
+  relevancy_model:
+    ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/rel_rm
+    positive_reward: 0.3
+    negative_reward: -0.3
+  factuality_model:
+    ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/fact_rm
+    positive_reward: 0.5
+    negative_reward: -0.5
+  completeness_model:
+    ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/comp_rm
+    mean: -0.44677690555995353
+    std: 8.301160619054132
+    bias: 0.0
+    scale: 0.3
+
+env:
+  sample_interval: 500
+  max_input_len: 1024
+  max_generated_len: 200
+  nlf_cond: False
+  num_quantiles: 3
+  num_attributes: 3
+  cond_on_feedback_quantiles: True
+  cond_on_best_quantiles: True
+  best_of_X_sampling: 2
+  kl_coef: 0.05
+  entropy_coef: 0.06
+
+train:
+  total_episodes: 50000
+  sampling_batch_size_per_card: 8
+  training_batch_size_per_card: 4
+  lr: 0.00001
+  n_warmup_steps: 100
+  clip_grad: False
+  max_grad_norm: 0.5
+  seed: 42
+  cuda_deterministic: True
+
+data:
+  train_data_path: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/data/train.json
+  dev_data_path: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/data/dev.json
+  test_data_path: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/data/test.json
+
+logging:
+  run_name: multitask_quark_bestOf2_allAttributes_3quantiles
+  wandb_log: True
+  wandb_entity: sauc-abadal
+  wandb_project: sauc-ms-thesis
+  log_interval: 100
+  save_interval: 500
+  eval_interval: 500
+  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_quark/sampling_bestOf2_allAttributes_3quantiles
