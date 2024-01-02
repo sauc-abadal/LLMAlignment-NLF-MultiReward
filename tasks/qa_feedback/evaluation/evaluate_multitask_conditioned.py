@@ -99,7 +99,7 @@ class Evaluator:
                 assert not feedback_quantiles, "Specify either conditioning on best feedback or on specific feedback quantiles, but not both."
                 for idx, feedback in enumerate(self.best_feedbacks): # e.g., best_feedbacks = ["Most relevant.", "Most factual.", "Most complete."] 
                     if total_feedback:
-                        total_feedback += f" and {feedback}" 
+                        total_feedback += f", and {feedback}" 
                     else:
                         total_feedback += f"{feedback}" 
             else:
@@ -110,7 +110,7 @@ class Evaluator:
                     if quantile_idx == -1:
                         continue
                     if total_feedback:
-                        total_feedback += f" and {self.feedback_types[idx][quantile_idx]}" 
+                        total_feedback += f", and {self.feedback_types[idx][quantile_idx]}" 
                     else:
                         total_feedback += f"{self.feedback_types[idx][quantile_idx]}" 
 
@@ -145,10 +145,28 @@ class Evaluator:
                 input_ids, attention_mask = batch["inputs"]
                 references.extend(batch["references"])
 
+                # feedback_quantiles = [0, 0, 0] # relevant, and factual, and complete
+
+                # feedback_quantiles = [0, 0, self.num_quantiles-1] # relevant, and factual, and incomplete
+                # feedback_quantiles = [self.num_quantiles-1, 0, 0] # irrelevant, and factual, and complete
+                # feedback_quantiles = [0, self.num_quantiles-1, 0] # relevant, and very inaccurate, and complete
+                
+                # feedback_quantiles = [0, 0, -1] # relevant, and factual
+                # feedback_quantiles = [-1, 0, 0] # factual, and complete
+                # feedback_quantiles = [0, -1, 0] # relevant, and complete
+
+                # feedback_quantiles = [self.num_quantiles-1, self.num_quantiles-1, self.num_quantiles-1] # irrelevant, and very inaccurate, and incomplete
+
+                # feedback_quantiles = [0, self.num_quantiles-1, self.num_quantiles-1] # relevant, and very inaccurate, and incomplete
+                # feedback_quantiles = [self.num_quantiles-1, 0, self.num_quantiles-1] # irrelevant, and factual, and incomplete
+                feedback_quantiles = [self.num_quantiles-1, self.num_quantiles-1, 0] # irrelevant, and very inaccurate, and complete
+
                 input_ids_feedback, attention_mask = self.add_feedback_to_prompt_input_ids(
                     input_ids=input_ids, attention_mask=attention_mask,
                     tokenizer=self.policy.tokenizer,
-                    best_feedback=True,
+                    feedback = None,
+                    best_feedback=False,
+                    feedback_quantiles=feedback_quantiles,
                     nlf_cond=self.nlf_cond
                 )
                 rollouts = self.policy.sample(prompts_input_ids=input_ids_feedback,
@@ -240,27 +258,21 @@ def main():
         feedback_types = [
             # RELEVANCY
             [
-                "Most relevant",
-                "Highly relevant",
-                "Moderately relevant",
-                "Slightly relevant",
-                "Least relevant"
+                "relevant",
+                "some irrelevancies",
+                "irrelevant",
             ],
             # FACTUALITY
             [
-                "Most factual",
-                "Highly factual",
-                "Moderately factual",
-                "Slightly factual",
-                "Least factual"
+                "factual",
+                "some inaccuracies",
+                "very inaccurate",
             ],
             # COMPLETENESS
             [
-                "Most complete",
-                "Highly complete",
-                "Moderately complete",
-                "Slightly complete",
-                "Least complete"
+                "complete",
+                "some details missing",
+                "incomplete",
             ],
         ]
         bad_words_ids = None

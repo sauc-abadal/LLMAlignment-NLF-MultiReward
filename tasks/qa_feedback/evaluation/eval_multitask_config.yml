@@ -1,7 +1,7 @@
 model:
   policy_model:
     base_model_ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/t5-large-1k-train
-    model_checkpoint_ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_bestOf3/12-14-2023_10:24:52/model/model_metric_0.6245634789348492_step_12500.pth
+    model_checkpoint_ckpt: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_bestOf1_allAttributes_3quantiles_newTags/12-22-2023_11:07:42/model/model_metric_0.6310628614798502_step_7000.pth
     input_padding_side: right
     eval_generation_kwargs:
       do_sample: False
@@ -28,7 +28,7 @@ env:
   max_input_len: 1024
   max_generated_len: 200
   nlf_cond: True
-  num_quantiles: 5
+  num_quantiles: 3
   num_attributes: 3
 
 eval:
@@ -37,7 +37,7 @@ eval:
   cuda_deterministic: True
 
 data:
-  data_path: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/data/test.json
+  data_path: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/data/dev.json
 
 logging:
-  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_bestOf3/12-14-2023_10:24:52
+  save_dir: /cluster/project/sachan/sauc/MultiTask-CTG-NLF/tasks/qa_feedback/model_outputs/multitask_ctgnlf/sampling_bestOf1_allAttributes_3quantiles_newTags/12-22-2023_11:07:42/evaluation
